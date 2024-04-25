@@ -1,9 +1,15 @@
 import './style.css'
+import axios from 'axios';
 
 // 规则
 /*
 
 */
+const request = axios.create({
+  baseURL: '/api',
+  timeout: 1000,
+  headers: {}
+});
 
 function Card(type, selected, id) {
     this.type = type;
@@ -29,6 +35,12 @@ for (let j = 0; j < card_face.length; j++) {
         cards_arr.push(new Card(card_face[j], false, id));
     }
 }
+let btn = document.querySelector('#hello-btn');
+btn.addEventListener('click', () => {
+    request.get('', {}).then(function (res) {
+        console.log(res.data);
+    });
+});
 
 start();
 render();
