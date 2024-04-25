@@ -1,5 +1,4 @@
 #card {
-    border-radius: 5px;
     position: relative;
     max-width: 30px;
     object-fit: cover;
@@ -7,7 +6,10 @@
     border: 1px solid transparent;
 }
 #card-wrapper {
+    border-radius: 5px;
     overflow: hidden;
+    width: 30px;
+    height: 45px;
 }
 /* #card-wrapper:last-child {
     overflow: visible;
@@ -35,6 +37,37 @@
     bottom: 0;
     left: 50%;
     transform: translateX(-50%);
+}
+#left-cards,
+#right-cards,
+#my-out-cards {
+    border-radius: 10px;
+    position: fixed;
+    padding: 10px;
+    width: 200px;
+    height: 150px;
+    background-color: aliceblue;
+    display: grid;
+    grid-template-columns: repeat(6, 1fr);
+    grid-template-rows: repeat(6, 1fr);
+    gap:3px;
+}
+#left-cards {
+    top: 10px;
+    left: 10px;
+}
+#right-cards {
+    top: 10px;
+    right: 10px;
+}
+#my-out-cards {
+    bottom: 10px;
+    left: 10px;
+}
+#button-group{
+    position: absolute;
+    right: 230px;
+    bottom: 100px;
 }
 body {
     background-color:darkgray;

@@ -24,10 +24,18 @@ let card_face = [
     "佳", "作", "仁", "福", "禄", "寿",
 ];
 
+let cur_turn = 0;
+
 let cards_arr = [];
 
 let hand = [];
+let left_hand = [];
+let right_hand = [];
 let total = [];
+
+let left_out = [];
+let right_out = [];
+let my_out = [];
 
 for (let j = 0; j < card_face.length; j++) {
     for (let i = 0; i < 4; i++) {
@@ -35,12 +43,7 @@ for (let j = 0; j < card_face.length; j++) {
         cards_arr.push(new Card(card_face[j], false, id));
     }
 }
-let btn = document.querySelector('#hello-btn');
-btn.addEventListener('click', () => {
-    request.get('', {}).then(function (res) {
-        console.log(res.data);
-    });
-});
+let btn = document.querySelector('#btn');
 
 start();
 render();
@@ -49,20 +52,100 @@ function getRandomInt(max) {
     return Math.floor(Math.random() * max);
 }
 
+
 function start() {
-    let total = cards_arr.map(a => ({...a}));;
+    total = cards_arr.map(a => ({...a}));;
+    play_card_btn_enable();
     for (let i = 0; i < 19; i++) {
-        let ind = getRandomInt(total.length);
-        let card = total[ind];
-        total.splice(ind, 1);
-        hand.push(card);
+        left_hand.push(draw_card());
     }
+    for (let i = 0; i < 19; i++) {
+        right_hand.push(draw_card());
+    }
+    for (let i = 0; i < 19; i++) {
+        hand.push(draw_card());
+    }
+}
+
+function draw_card() {
+    let ind = getRandomInt(total.length);
+    let card = total[ind];
+    total.splice(ind, 1);
+    return card
+}
+
+function my_turn() {
+    let card = draw_card();
+    hand.push(card);
+    render();
+    play_card_btn_enable();
+}
+
+function play_card() {
+    for (let i = 0; i < hand.length; i++) {
+        let card = hand[i];
+        if (card.selected) {
+            hand.splice(i, 1);
+            card.selected = false;
+            let container = document.querySelector('#my-out-cards');
+            append_out(container, card, my_out);
+            render();
+            break;
+        }
+    }
+    // request.get('', {}).then(function (res) {
+    //     console.log(res.data);
+    // });
+    hide_btn();
+    cur_turn = (cur_turn + 1) % 3;
+    wait_others();
+}
+
+function play_card_btn_enable() {
+    btn.removeAttribute("hidden");
+    btn.addEventListener('click', play_card);
+}
+
+function wait_others() {
+    setTimeout(() => {
+        let new_card = draw_card();
+        right_hand.push(new_card);
+        let card = discard_card(right_hand);
+        let container = document.querySelector('#right-cards');
+        append_out(container, card, right_hand);
+        cur_turn = (cur_turn + 1) % 3;
+    }, 400);
+    setTimeout(() => {
+        let new_card = draw_card();
+        left_hand.push(new_card);
+        let card = discard_card(left_hand);
+        let container = document.querySelector('#left-cards');
+        append_out(container, card, left_hand);
+        cur_turn = (cur_turn + 1) % 3;
+        my_turn();
+    }, 800);
+}
+
+function discard_card(hand) {
+    let ind = getRandomInt(hand.length);
+    let card = hand[ind];
+    hand.splice(ind, 1);
+    return card;
+}
+
+function hide_btn() {
+    btn.setAttribute("hidden", "true");
+    btn.removeEventListener("click", play_card);
 }
 
 function sort_hand() {
     hand.sort((a, b) =>
         a.id - b.id
     )
+}
+
+function append_out(container, card, out) {
+    container.appendChild(create_card(card))
 }
 
 
