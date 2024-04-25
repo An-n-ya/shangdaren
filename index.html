@@ -8,42 +8,6 @@
   </head>
   <body>
     <div id="cards">
-        <div id="card">
-            <img src="上大人/七.png" alt="" id="card">
-        </div>
-        <div id="card">
-            <img src="上大人/七.png" alt="" id="card">
-        </div>
-        <div id="card">
-            <img src="上大人/上.png" alt="" id="card">
-        </div>
-        <div id="card">
-            <img src="上大人/上.png" alt="" id="card">
-        </div>
-        <div id="card">
-            <img src="上大人/上.png" alt="" id="card">
-        </div>
-        <div id="card">
-            <img src="上大人/上.png" alt="" id="card">
-        </div>
-        <div id="card">
-            <img src="上大人/上.png" alt="" id="card">
-        </div>
-        <div id="card">
-            <img src="上大人/上.png" alt="" id="card">
-        </div>
-        <div id="card">
-            <img src="上大人/上.png" alt="" id="card">
-        </div>
-        <div id="card">
-            <img src="上大人/上.png" alt="" id="card">
-        </div>
-        <div id="card">
-            <img src="上大人/上.png" alt="" id="card">
-        </div>
-        <div id="card">
-            <img src="上大人/上.png" alt="" id="card">
-        </div>
     </div>
     <script type="module" src="/main.js"></script>
   </body>
@@ -51,20 +15,40 @@
     #card {
         border-radius: 5px;
         position: relative;
-        max-width: 40px;
+        max-width: 30px;
         object-fit: cover;
         margin-right: 2px;
         border: 1px solid transparent;
     }
+    #card-wrapper {
+        overflow: hidden;
+    }
+    /* #card-wrapper:last-child {
+        overflow: visible;
+    } */
     #card.selected{
-        border: 1px solid black;
-        top: -10px;
+        border: 1px solid red;
+        box-shadow: rgba(170, 0, 0, 0.35) 0px 5px 15px;
+        /* top: -10px; */
+    }
+    #group {
+        height: 100%;
+        display: inline-flex;
+        max-height: 140px;
+        flex-direction: column;
+        align-content: end;
+        justify-content: end;
     }
     #cards {
-        display: flex;
-        position: absolute;
-        top: 55%;
-        left: 20%;
+        display: inline-flex;
+        white-space: nowrap;
+        align-items: end;
+        overflow-x: hidden;
+        overflow-y: visible;
+        position: fixed;
+        bottom: 0;
+        left: 50%;
+        transform: translateX(-50%);
     }
     body {
         background-color:darkgray;
