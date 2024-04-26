@@ -1,3 +1,5 @@
+use std::os::linux::raw::stat;
+
 use card::{Card, Pairing};
 use redis::Connection;
 use rocket::serde::{json::Json, Deserialize};
@@ -34,12 +36,33 @@ impl GameState {
             round: 0,
         }
     }
+
+    pub fn discard_card(&mut self) -> Card {
+        let index = rand::random::<usize>() % self.my_hand.len();
+        let card = *self.my_hand.get(index).unwrap();
+
+        self.my_hand.remove(index);
+
+        card
+    }
 }
 
 #[derive(Deserialize)]
 #[serde(crate = "rocket::serde")]
 struct InitialData {
     hand: Vec<u8>,
+    turn: u8,
+}
+#[derive(Serialize)]
+#[serde(crate = "rocket::serde")]
+struct DiscardResponse {
+    card: u8,
+}
+
+#[derive(Deserialize)]
+#[serde(crate = "rocket::serde")]
+struct DrawData {
+    card: u8,
     turn: u8,
 }
 
@@ -79,6 +102,26 @@ fn end_game(session_id: &str) {
     }
 }
 
+#[post("/turn/<session_id>", data = "<data>")]
+fn turn(session_id: &str, data: Json<DrawData>) -> Json<DiscardResponse> {
+    assert!([0, 1, 2].contains(&data.turn));
+    let turn = data.turn;
+    let card = Card(data.card);
+
+    let mut con = get_redis_con();
+    let s: String = redis::cmd("HGET")
+        .arg(&session_id)
+        .arg(&format!("{turn}"))
+        .query(&mut con)
+        .unwrap();
+    let mut state: GameState = serde_json::from_str(&s).unwrap();
+    state.my_hand.push(card);
+
+    let card = state.discard_card();
+
+    Json(DiscardResponse { card: card.0 })
+}
+
 fn get_redis_con() -> Connection {
     let client = redis::Client::open("redis://127.0.0.1/").unwrap();
     client.get_connection().unwrap()
@@ -86,5 +129,5 @@ fn get_redis_con() -> Connection {
 
 #[launch]
 fn rocket() -> _ {
-    rocket::build().mount("/api", routes![new_game, initial, end_game])
+    rocket::build().mount("/api", routes![new_game, initial, end_game, turn])
 }

@@ -17,6 +17,13 @@ function Card(type, selected, id) {
     this.id = id;
 }
 
+function Player(turn, hand, out) {
+    this.name = "";
+    this.turn = turn;
+    this.hand = hand;
+    this.out = out;
+}
+
 let card_face = [
     "上", "大", "人", "孔", "乙", "己",
     "化", "三", "千", "七", "十", "士",
@@ -25,18 +32,15 @@ let card_face = [
 ];
 
 let cur_turn = 0;
+let my_turn = 0;
 let session_id = "";
 
 let cards_arr = [];
 
-let hand = [];
-let left_hand = [];
-let right_hand = [];
 let total = [];
 
-let left_out = [];
-let right_out = [];
-let my_out = [];
+
+let players = [];
 
 for (let j = 0; j < card_face.length; j++) {
     for (let i = 0; i < 4; i++) {
@@ -50,7 +54,12 @@ start();
 render();
 
 function getRandomInt(max) {
-    return Math.floor(Math.random() * max);
+    while (true) {
+        let rand = Math.random();
+        if (rand != 1) {
+            return Math.floor(rand * max);
+        }
+    }
 }
 
 async function end() {
@@ -61,32 +70,37 @@ async function end() {
 
 async function start() {
     total = cards_arr.map(a => ({...a}));;
-    play_card_btn_enable();
-    for (let i = 0; i < 19; i++) {
-        left_hand.push(draw_card());
+    for (let i = 0; i < 3; i++) {
+        let player = new Player(i, [], []);
+        for (let j = 0; j < 19; j++) {
+            player.hand.push(draw_card());
+        }
+        players.push(player);
     }
-    for (let i = 0; i < 19; i++) {
-        right_hand.push(draw_card());
-    }
-    for (let i = 0; i < 19; i++) {
-        hand.push(draw_card());
-    }
+    my_turn = getRandomInt(3);
+    console.log("my_turn: ", my_turn);
+    let right = (my_turn + 1) % 3;
+    let left = (right + 1) % 3;
+    players[right].name = "right";
+    players[left].name = "left";
+
 
     let res = await request.get("/new_game", {});
     session_id = res.data;
     let initial_url = "/initial/" + session_id;
-    request.post(initial_url, {
-        hand: hand_to_data(hand),
-        turn: 0
-    });
-    request.post(initial_url, {
-        hand: hand_to_data(right_hand),
-        turn: 1
-    });
-    request.post(initial_url, {
-        hand: hand_to_data(left_hand),
-        turn: 2
-    });
+    for (let i = 0; i < 3; i++) {
+        if (i != my_turn) {
+            request.post(initial_url, {
+                hand: hand_to_data(players[i].hand),
+                turn: i
+            });
+        }
+    }
+
+    while (my_turn != cur_turn) {
+        await wait_player(players[cur_turn]);
+    }
+    my_turn_begin();
 }
 
 function hand_to_data(hand) {
@@ -104,21 +118,23 @@ function draw_card() {
     return card
 }
 
-function my_turn() {
+function my_turn_begin() {
     let card = draw_card();
+    let hand = players[my_turn].hand;
     hand.push(card);
     render();
     play_card_btn_enable();
 }
 
-function play_card() {
+async function play_card() {
+    let hand = players[my_turn].hand;
     for (let i = 0; i < hand.length; i++) {
         let card = hand[i];
         if (card.selected) {
             hand.splice(i, 1);
             card.selected = false;
             let container = document.querySelector('#my-out-cards');
-            append_out(container, card, my_out);
+            append_out(container, card);
             render();
             break;
         }
@@ -128,7 +144,10 @@ function play_card() {
     // });
     hide_btn();
     cur_turn = (cur_turn + 1) % 3;
-    wait_others();
+    await wait_player(players[cur_turn]);
+    await wait_player(players[cur_turn]);
+
+    my_turn_begin();
 }
 
 function play_card_btn_enable() {
@@ -136,31 +155,27 @@ function play_card_btn_enable() {
     btn.addEventListener('click', play_card);
 }
 
-function wait_others() {
-    setTimeout(() => {
+async function wait_player(player) {
         let new_card = draw_card();
-        right_hand.push(new_card);
-        let card = discard_card(right_hand);
-        let container = document.querySelector('#right-cards');
-        append_out(container, card, right_hand);
+        let res = await request.post("/turn/" + session_id, {
+            card: new_card.id,
+            turn: cur_turn
+        });
+        let discard_id = res.data.card;
+        let card = discard_card(player.hand,discard_id);
+        let container = document.querySelector("#" + player.name + "-cards");
+        append_out(container, card, player.hand);
         cur_turn = (cur_turn + 1) % 3;
-    }, 400);
-    setTimeout(() => {
-        let new_card = draw_card();
-        left_hand.push(new_card);
-        let card = discard_card(left_hand);
-        let container = document.querySelector('#left-cards');
-        append_out(container, card, left_hand);
-        cur_turn = (cur_turn + 1) % 3;
-        my_turn();
-    }, 800);
 }
 
-function discard_card(hand) {
-    let ind = getRandomInt(hand.length);
-    let card = hand[ind];
-    hand.splice(ind, 1);
-    return card;
+function discard_card(hand, id) {
+    for (let i = 0 ; i < hand.length; i++) {
+        if (hand[i].id == id) {
+            let card = hand[i];
+            hand.splice(i, 1);
+            return card;
+        }
+    }
 }
 
 function hide_btn() {
@@ -169,13 +184,13 @@ function hide_btn() {
 }
 
 function sort_hand() {
-    hand.sort((a, b) =>
+    players[my_turn].hand.sort((a, b) =>
         a.id - b.id
     )
 }
 
-function append_out(container, card, out) {
-    container.appendChild(create_card(card))
+function append_out(container, card) {
+    container.appendChild(create_card(card, false))
 }
 
 
@@ -185,11 +200,11 @@ function render() {
     sort_hand();
     let cur_group = 1;
     let group = document.createElement("div");
-            group.id = "group";
-    for (let i = 0; i < hand.length; i++) {
-        let card = hand[i];
+    group.id = "group";
+    for (let i = 0; i < players[my_turn].hand.length; i++) {
+        let card = players[my_turn].hand[i];
         if (card.id >= (cur_group - 1) * 12 && card.id < cur_group * 12) {
-            group.appendChild(create_card(card));
+            group.appendChild(create_card(card, true));
         } else {
             while (cur_group * 12 <= card.id) {
                 cur_group += 1;
@@ -200,7 +215,7 @@ function render() {
             }
             group = document.createElement("div");
             group.id = "group";
-            group.appendChild(create_card(card));
+            group.appendChild(create_card(card, true));
         }
     }
     if (group.childNodes.length != 0) {
@@ -209,26 +224,29 @@ function render() {
     }
 }
 
-function create_card(card) {
+function create_card(card, clickable) {
     let div = document.createElement("div");
     div.id = "card-wrapper";
     let img = document.createElement("img");
     img.src = "上大人/" + card.type + ".png";
-    img.addEventListener('click', () => {
-        for (let i = 0; i < hand.length; i++) {
-            if (hand[i].id == card.id) {
-                hand[i].selected = true;
-            } else {
-                hand[i].selected = false;
+    if (clickable) {
+        img.addEventListener('click', () => {
+            let hand = players[my_turn].hand;
+            for (let i = 0; i < hand.length; i++) {
+                if (hand[i].id == card.id) {
+                    hand[i].selected = true;
+                } else {
+                    hand[i].selected = false;
+                }
             }
+            render();
+        })
+        if (card.selected) {
+            img.classList.add("selected");
+            div.classList.add("selected");
         }
-        render();
-    })
-    img.id = "card";
-    if (card.selected) {
-        img.classList.add("selected");
-        div.classList.add("selected");
     }
+    img.id = "card";
     div.appendChild(img);
 
     return div;
