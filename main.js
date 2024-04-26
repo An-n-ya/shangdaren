@@ -25,6 +25,7 @@ let card_face = [
 ];
 
 let cur_turn = 0;
+let session_id = "";
 
 let cards_arr = [];
 
@@ -52,8 +53,13 @@ function getRandomInt(max) {
     return Math.floor(Math.random() * max);
 }
 
+async function end() {
+    await request.get("/end_game/" + session_id, {});
+    console.log("game end!");
+}
 
-function start() {
+
+async function start() {
     total = cards_arr.map(a => ({...a}));;
     play_card_btn_enable();
     for (let i = 0; i < 19; i++) {
@@ -65,6 +71,30 @@ function start() {
     for (let i = 0; i < 19; i++) {
         hand.push(draw_card());
     }
+
+    let res = await request.get("/new_game", {});
+    session_id = res.data;
+    let initial_url = "/initial/" + session_id;
+    request.post(initial_url, {
+        hand: hand_to_data(hand),
+        turn: 0
+    });
+    request.post(initial_url, {
+        hand: hand_to_data(right_hand),
+        turn: 1
+    });
+    request.post(initial_url, {
+        hand: hand_to_data(left_hand),
+        turn: 2
+    });
+}
+
+function hand_to_data(hand) {
+    let data = [];
+    for (let i = 0; i < hand.length; i++) {
+        data.push(hand[i].id);
+    }
+    return data;
 }
 
 function draw_card() {
