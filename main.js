@@ -1,9 +1,12 @@
 import './style.css'
 import axios from 'axios';
 
-// 规则
+// TODO:
 /*
-
+    - is_hu() for client and server
+    - wa and ding action
+    - discard card action
+    - display wa and ding
 */
 const request = axios.create({
   baseURL: '/api',
@@ -65,6 +68,7 @@ function getRandomInt(max) {
 async function end() {
     await request.get("/end_game/" + session_id, {});
     console.log("game end!");
+    while (true) {}
 }
 
 
@@ -128,8 +132,9 @@ function my_turn_begin() {
 
 async function play_card() {
     let hand = players[my_turn].hand;
+    let card = undefined;
     for (let i = 0; i < hand.length; i++) {
-        let card = hand[i];
+        card = hand[i];
         if (card.selected) {
             hand.splice(i, 1);
             card.selected = false;
@@ -139,15 +144,26 @@ async function play_card() {
             break;
         }
     }
-    // request.get('', {}).then(function (res) {
-    //     console.log(res.data);
-    // });
     hide_btn();
     cur_turn = (cur_turn + 1) % 3;
+    await broadcast_discard(card);
+
     await wait_player(players[cur_turn]);
     await wait_player(players[cur_turn]);
 
     my_turn_begin();
+}
+
+async function broadcast_discard(card) {
+    for (let i = 0; i < 3; i++) {
+        if (i != my_turn && i != cur_turn) {
+            request.post("/discard/" + session_id, {
+                card: card.id,
+                turn: i,
+                cur_turn: cur_turn
+            });
+        }
+    }
 }
 
 function play_card_btn_enable() {
@@ -161,10 +177,16 @@ async function wait_player(player) {
             card: new_card.id,
             turn: cur_turn
         });
-        let discard_id = res.data.card;
+        let is_win = res.data.win;
+        if (is_win) {
+            end();
+            return
+        }
+        let discard_id = res.data.discard;
         let card = discard_card(player.hand,discard_id);
         let container = document.querySelector("#" + player.name + "-cards");
         append_out(container, card, player.hand);
+        broadcast_discard(card);
         cur_turn = (cur_turn + 1) % 3;
 }
 
