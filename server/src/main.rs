@@ -1,4 +1,6 @@
-use card::{Card, Pairing};
+use agent::Agent;
+use card::Card;
+use game::{Game, Mode};
 use redis::Connection;
 use rocket::serde::{json::Json, Deserialize};
 use serde::Serialize;
@@ -7,141 +9,10 @@ use uuid::Uuid;
 #[macro_use]
 extern crate rocket;
 
+mod agent;
 mod card;
-
-#[derive(Deserialize, Serialize)]
-struct Agent {
-    my_hand: Vec<Card>,
-    my_out: Vec<Card>,
-    my_pairing: Vec<Pairing>,
-    player1_out: Vec<Card>,
-    player1_pairing: Vec<Pairing>,
-    player2_out: Vec<Card>,
-    player2_pairing: Vec<Pairing>,
-    round: u8,
-    turn: u8,
-}
-
-#[derive(Deserialize, Serialize)]
-struct Player {
-    hand: Vec<Card>,
-    out: Vec<Card>,
-    pairing: Vec<Pairing>,
-    pub is_robot: bool,
-    pub initialized: bool,
-}
-
-#[derive(Deserialize, Serialize, Clone, Copy)]
-enum Mode {
-    Wa,
-    Ding,
-    Normal,
-}
-
-#[derive(Deserialize, Serialize)]
-struct Game {
-    pub players: Vec<Player>,
-    remaining_cards: Vec<Card>,
-    round: u8,
-    turn: u8,
-    jing: Card,
-    mode: Mode,
-}
-
-impl Game {
-    const TOTAL: usize = 96;
-    pub fn new() -> Self {
-        Self {
-            players: vec![],
-            remaining_cards: (0..96).into_iter().map(|n| Card(n)).collect(),
-            round: 0,
-            turn: 0,
-            jing: Card(0),
-            mode: Mode::Normal,
-        }
-    }
-
-    pub fn add_player(&mut self) {
-        self.players.push(Player {
-            hand: vec![],
-            out: vec![],
-            pairing: vec![],
-            is_robot: false,
-            initialized: false,
-        })
-    }
-    pub fn add_robot(&mut self) {
-        self.players.push(Player {
-            hand: vec![],
-            out: vec![],
-            pairing: vec![],
-            is_robot: true,
-            initialized: true,
-        })
-    }
-
-    pub fn start(&mut self) {
-        if self.players.len() != 3 {
-            panic!("wrong players number {}", self.players.len());
-        }
-        self.shuffle_cards();
-        self.jing = Card(rand::random::<u8>() % Self::TOTAL as u8);
-        for i in 0..3 {
-            for _ in 0..19 {
-                self.players[i]
-                    .hand
-                    .push(self.remaining_cards.pop().unwrap());
-            }
-        }
-        self.turn = rand::random::<u8>() % 3;
-    }
-
-    pub fn is_turn(&self, turn: u8) -> Option<Mode> {
-        if self.turn == turn {
-            Some(self.mode)
-        } else {
-            None
-        }
-    }
-
-    fn shuffle_cards(&mut self) {
-        for i in 0..96usize {
-            let j = rand::random::<usize>() % Self::TOTAL;
-            (self.remaining_cards[i], self.remaining_cards[j]) =
-                (self.remaining_cards[j], self.remaining_cards[i]);
-        }
-    }
-
-    pub fn hand_of_player(&self, ind: usize) -> Vec<Card> {
-        self.players[ind].hand.clone()
-    }
-}
-
-impl Agent {
-    pub fn new(hand: Vec<Card>, turn: u8) -> Self {
-        Self {
-            my_hand: hand,
-            my_out: vec![],
-            my_pairing: vec![],
-            player1_out: vec![],
-            player1_pairing: vec![],
-            player2_out: vec![],
-            player2_pairing: vec![],
-            round: 0,
-            turn,
-        }
-    }
-
-    pub fn discard_card(&mut self) -> Card {
-        let index = rand::random::<usize>() % self.my_hand.len();
-        let card = *self.my_hand.get(index).unwrap();
-        self.my_out.push(card);
-
-        self.my_hand.remove(index);
-
-        card
-    }
-}
+mod game;
+mod room;
 
 #[derive(Serialize)]
 #[serde(crate = "rocket::serde")]
