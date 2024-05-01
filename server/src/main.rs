@@ -1,10 +1,15 @@
+use std::{collections::HashMap, sync::Mutex};
+
 use agent::Agent;
 use card::Card;
 use game::{Game, Mode};
+use handlers::room::create_room;
 use redis::Connection;
 use rocket::serde::{json::Json, Deserialize};
+use room::Room;
 use serde::Serialize;
 use uuid::Uuid;
+use ws::Message;
 
 #[macro_use]
 extern crate rocket;
@@ -13,6 +18,22 @@ mod agent;
 mod card;
 mod game;
 mod room;
+
+mod handlers;
+
+pub struct GlobalState {
+    rooms: Mutex<HashMap<String, Room>>,
+}
+
+impl GlobalState {
+    pub fn new() -> Self {
+        Self {
+            rooms: Mutex::new(HashMap::new()),
+        }
+    }
+
+    pub fn handle_message(&self, msg: Message) {}
+}
 
 #[derive(Serialize)]
 #[serde(crate = "rocket::serde")]
@@ -222,5 +243,10 @@ fn get_redis_con() -> Connection {
 
 #[launch]
 fn rocket() -> _ {
-    rocket::build().mount("/api", routes![new_game, initial, end_game, turn, discard])
+    rocket::build()
+        .mount(
+            "/api",
+            routes![new_game, initial, end_game, turn, discard, create_room],
+        )
+        .manage(GlobalState::new())
 }
