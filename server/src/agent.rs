@@ -1,5 +1,4 @@
-use rocket::serde::Deserialize;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::card::{Card, Pairing};
 #[derive(Deserialize, Serialize)]
