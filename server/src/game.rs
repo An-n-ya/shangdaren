@@ -1,15 +1,15 @@
-use std::{
-    borrow::Borrow,
-    sync::atomic::{AtomicU8, Ordering},
-};
+use std::sync::atomic::{AtomicU8, Ordering};
 
-use crate::card::{Card, Pairing};
+use crate::{
+    agent::Agent,
+    card::{Card, Pairing},
+};
 use anyhow::{bail, Context, Ok, Result};
 use futures::prelude::*;
 use log::warn;
 use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
-use tokio::sync::broadcast;
+use tokio::sync::broadcast::{self, Sender};
 use warp::ws::{Message, WebSocket};
 
 pub struct Game {
@@ -19,25 +19,18 @@ pub struct Game {
 }
 
 struct GameState {
-    pub players: Vec<Player>,
+    pub players: Vec<Agent>,
     remaining_cards: Vec<Card>,
     round: u8,
     pub turn: u8,
+    prev_turn: Option<u8>,
     jing: Card,
     mode: Mode,
 }
-#[derive(Deserialize, Serialize)]
-pub struct Player {
-    hand: Vec<Card>,
-    out: Vec<Card>,
-    pairing: Vec<Pairing>,
-    pub is_robot: bool,
-    pub ready: bool,
-}
 #[derive(Deserialize, Serialize, Clone, Copy, PartialEq, Eq)]
 pub enum Mode {
-    Wa,
-    Ding,
+    Wa(Card),
+    Ding(Card),
     Normal,
 }
 
@@ -47,6 +40,8 @@ enum ClientMessage {
     AddRobot,
     Start,
     Discard { card: Card },
+    Ding { confirm: bool },
+    Wa { confirm: bool },
 }
 #[derive(Clone, Serialize, Deserialize)]
 enum ServerMessage {
@@ -61,6 +56,10 @@ enum ServerMessage {
         hand: Vec<Card>,
     },
     Draw {
+        to: Option<u8>,
+        card: Card,
+    },
+    Discard {
         to: Option<u8>,
         card: Card,
     },
@@ -79,6 +78,7 @@ impl ServerMessage {
             ServerMessage::Turn { to, .. } => to.is_none(),
             ServerMessage::Initial { to, .. } => to.is_none(),
             ServerMessage::Draw { to, .. } => to.is_none(),
+            ServerMessage::Discard { to, .. } => to.is_none(),
         }
     }
 
@@ -87,6 +87,7 @@ impl ServerMessage {
             ServerMessage::Turn { to, .. } => *to,
             ServerMessage::Initial { to, .. } => *to,
             ServerMessage::Draw { to, .. } => *to,
+            ServerMessage::Discard { to, .. } => *to,
         }
     }
 }
@@ -111,6 +112,7 @@ impl Default for GameState {
                 .collect(),
             round: 0,
             turn: 0,
+            prev_turn: None,
             jing: Card(0),
             mode: Mode::Normal,
         }
@@ -120,22 +122,13 @@ impl GameState {
     const TOTAL: usize = 96;
     const PLAYER_NUM: u8 = 3;
     pub fn add_player(&mut self) {
-        self.players.push(Player {
-            hand: vec![],
-            out: vec![],
-            pairing: vec![],
-            is_robot: false,
-            ready: false,
-        })
+        self.players.push(Agent::default())
     }
     pub fn add_robot(&mut self) {
-        self.players.push(Player {
-            hand: vec![],
-            out: vec![],
-            pairing: vec![],
-            is_robot: true,
-            ready: true,
-        })
+        let mut agent = Agent::default();
+        agent.is_robot = true;
+        agent.ready = true;
+        self.players.push(agent)
     }
 
     pub fn start(&mut self) -> Result<()> {
@@ -155,47 +148,54 @@ impl GameState {
         Ok(())
     }
 
-    pub fn is_turn(&self, turn: u8) -> Option<Mode> {
-        if self.turn == turn {
-            Some(self.mode)
-        } else {
-            None
+    pub fn restore_turn(&mut self) -> ServerMessage {
+        self.turn = self.prev_turn.expect("missing previous turn");
+        ServerMessage::Turn {
+            to: None,
+            turn: self.turn,
+            mode: Mode::Normal,
         }
     }
 
     pub fn next_turn(&mut self, discard: &Card) -> ServerMessage {
         let next_player = ((self.turn + 1) % Self::PLAYER_NUM) as usize;
         let prev_player = ((self.turn + 1) % Self::PLAYER_NUM) as usize;
+        self.prev_turn = Some((self.turn + 1) % Self::PLAYER_NUM);
         if Self::can_form_triplet(&self.players[next_player].hand, discard) {
             self.turn = next_player as u8;
+            self.mode = Mode::Ding(*discard);
             ServerMessage::Turn {
                 to: None,
                 turn: self.turn,
-                mode: Mode::Ding,
+                mode: Mode::Ding(*discard),
             }
         } else if Self::can_form_quadlet(&self.players[next_player].hand, discard) {
             self.turn = next_player as u8;
+            self.mode = Mode::Wa(*discard);
             ServerMessage::Turn {
                 to: None,
                 turn: self.turn,
-                mode: Mode::Wa,
+                mode: Mode::Wa(*discard),
             }
         } else if Self::can_form_triplet(&self.players[prev_player].hand, discard) {
             self.turn = prev_player as u8;
+            self.mode = Mode::Ding(*discard);
             ServerMessage::Turn {
                 to: None,
                 turn: self.turn,
-                mode: Mode::Ding,
+                mode: Mode::Ding(*discard),
             }
         } else if Self::can_form_quadlet(&self.players[prev_player].hand, discard) {
             self.turn = prev_player as u8;
+            self.mode = Mode::Wa(*discard);
             ServerMessage::Turn {
                 to: None,
                 turn: self.turn,
-                mode: Mode::Wa,
+                mode: Mode::Wa(*discard),
             }
         } else {
             self.turn = (self.turn + 1) % Self::PLAYER_NUM;
+            self.mode = Mode::Normal;
             ServerMessage::Turn {
                 to: None,
                 turn: self.turn,
@@ -211,6 +211,125 @@ impl GameState {
             to: Some(self.turn),
             card,
         }
+    }
+
+    pub fn is_robot_turn(&self) -> bool {
+        self.players[self.turn as usize].is_robot
+    }
+
+    pub fn robot_turn(&mut self, con: &Sender<ServerMessage>) -> Option<Card> {
+        assert!(self.is_robot_turn());
+        let mut card = Card(0);
+        let right = (self.turn + 1) % Self::PLAYER_NUM;
+        let left = (right + 1) % Self::PLAYER_NUM;
+
+        enum Pos {
+            Right,
+            Left,
+        }
+
+        match self.mode {
+            m @ Mode::Wa(discard) => {
+                if self.players[self.turn as usize].wa_card(discard) {
+                    for (pos, n) in [(Pos::Right, right), (Pos::Left, left)] {
+                        let is_robot = match pos {
+                            Pos::Right => {
+                                if self.players[right as usize].is_robot {
+                                    self.players[right as usize]
+                                        .player_left_pairing
+                                        .push(Pairing::Quadlet(discard));
+                                    true
+                                } else {
+                                    false
+                                }
+                            }
+                            Pos::Left => {
+                                if self.players[left as usize].is_robot {
+                                    self.players[left as usize]
+                                        .player_right_pairing
+                                        .push(Pairing::Quadlet(discard));
+                                    true
+                                } else {
+                                    false
+                                }
+                            }
+                        };
+                        if !is_robot {
+                            con.send(ServerMessage::Turn {
+                                to: Some(n),
+                                turn: self.turn,
+                                mode: m,
+                            })
+                            .ok();
+                        }
+                    }
+                    let draw_card = self.remaining_cards.pop().unwrap();
+                    self.players[self.turn as usize].hand.push(draw_card);
+                    card = self.players[self.turn as usize].discard_card();
+                } else {
+                    let msg = self.restore_turn();
+                    con.send(msg).ok();
+                    return None;
+                }
+            }
+            m @ Mode::Ding(discard) => {
+                if self.players[self.turn as usize].ding_card(discard) {
+                    for (pos, n) in [(Pos::Right, right), (Pos::Left, left)] {
+                        let is_robot = match pos {
+                            Pos::Right => {
+                                if self.players[right as usize].is_robot {
+                                    self.players[right as usize]
+                                        .player_left_pairing
+                                        .push(Pairing::Triplet(discard));
+                                    true
+                                } else {
+                                    false
+                                }
+                            }
+                            Pos::Left => {
+                                if self.players[left as usize].is_robot {
+                                    self.players[left as usize]
+                                        .player_right_pairing
+                                        .push(Pairing::Triplet(discard));
+                                    true
+                                } else {
+                                    false
+                                }
+                            }
+                        };
+                        if !is_robot {
+                            con.send(ServerMessage::Turn {
+                                to: Some(n),
+                                turn: self.turn,
+                                mode: m,
+                            })
+                            .ok();
+                        }
+                    }
+                    card = self.players[self.turn as usize].discard_card();
+                } else {
+                    let msg = self.restore_turn();
+                    con.send(msg).ok();
+                    return None;
+                }
+            }
+            Mode::Normal => {
+                self.draw_card();
+                card = self.players[self.turn as usize].discard_card();
+            }
+        }
+        for (pos, n) in [(Pos::Right, right), (Pos::Left, left)] {
+            let player = &mut self.players[n as usize];
+            if player.is_robot {
+                match pos {
+                    Pos::Right => player.player_left_out.push(card),
+                    Pos::Left => player.player_right_out.push(card),
+                }
+            } else {
+                con.send(ServerMessage::Discard { to: Some(n), card }).ok();
+            }
+        }
+        Some(card)
     }
 
     fn can_form_quadlet(hand: &Vec<Card>, card: &Card) -> bool {
@@ -322,17 +441,72 @@ impl Game {
                         })
                         .ok();
                 }
+                loop {
+                    if !self.state.read().is_robot_turn() {
+                        break;
+                    }
+                    let card = self.state.write().robot_turn(&self.connection);
+                    let msg = if let Some(card) = card {
+                        self.state.write().next_turn(&card)
+                    } else {
+                        ServerMessage::Turn {
+                            to: None,
+                            turn: self.state.read().turn,
+                            mode: Mode::Normal,
+                        }
+                    };
+                    self.connection.send(msg).ok();
+                }
             }
             ClientMessage::Discard { card } => {
                 self.state.write().discard_card(id as usize, card)?;
-                let msg = self.state.write().next_turn(&card);
-                self.connection.send(msg.clone()).ok();
-
-                if let ServerMessage::Turn { mode, .. } = msg {
-                    if mode == Mode::Normal {
-                        let msg = self.state.write().draw_card();
-                        self.connection.send(msg).ok();
+                let mut card = Some(card);
+                loop {
+                    let msg = if let Some(card) = card {
+                        self.state.write().next_turn(&card)
+                    } else {
+                        ServerMessage::Turn {
+                            to: None,
+                            turn: self.state.read().turn,
+                            mode: Mode::Normal,
+                        }
+                    };
+                    self.connection.send(msg).ok();
+                    if !self.state.read().is_robot_turn() {
+                        break;
                     }
+                    card = self.state.write().robot_turn(&self.connection);
+                }
+
+                if Mode::Normal == self.state.read().mode {
+                    let msg = self.state.write().draw_card();
+                    self.connection.send(msg).ok();
+                }
+            }
+            ClientMessage::Ding { confirm } => {
+                if !confirm {
+                    let msg = self.state.write().restore_turn();
+                    self.connection.send(msg).ok();
+                    while self.state.read().is_robot_turn() {
+                        self.state.write().robot_turn(&self.connection);
+                    }
+                    let msg = self.state.write().draw_card();
+                    self.connection.send(msg).ok();
+                } else {
+                    // TODO: broadcast ding action and discard another card
+                }
+            }
+            ClientMessage::Wa { confirm } => {
+                if !confirm {
+                    let msg = self.state.write().restore_turn();
+                    self.connection.send(msg).ok();
+                    while self.state.read().is_robot_turn() {
+                        self.state.write().robot_turn(&self.connection);
+                    }
+                    let msg = self.state.write().draw_card();
+                    self.connection.send(msg).ok();
+                } else {
+                    // TODO: broadcast wa action and draw card and discard another card
                 }
             }
         }

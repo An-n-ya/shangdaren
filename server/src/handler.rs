@@ -1,6 +1,6 @@
 use warp::{filters::ws::Ws, reject::Rejection, reply::Reply};
 
-use crate::{game::Game, room::Room, GlobalState};
+use crate::{room::Room, GlobalState};
 
 pub async fn socket_handler(
     id: String,
@@ -8,7 +8,8 @@ pub async fn socket_handler(
     state: GlobalState,
 ) -> Result<impl Reply, Rejection> {
     use dashmap::mapref::entry::Entry;
-    let mut entry = match state.rooms.entry(id.clone()) {
+
+    let entry = match state.rooms.entry(id.clone()) {
         Entry::Occupied(e) => e.into_ref(),
         Entry::Vacant(e) => {
             let room = Room::new();
