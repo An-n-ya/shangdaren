@@ -14,10 +14,109 @@ const request = axios.create({
   headers: {}
 });
 
-function Card(type, selected, id) {
-    this.type = type;
-    this.selected = selected;
-    this.id = id;
+let room_id = "";
+const printable_chars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+
+function get_hash() {
+    if (!window.location.hash) {
+        room_id = "";
+        for (let i = 0; i < 5; i++) {
+            room_id += printable_chars[getRandomInt(printable_chars.length)];
+        }
+        window.history.replaceState(null, "", "#" + room_id);
+    } else {
+        room_id = window.location.hash.slice(1);
+    }
+    console.log("room_id: ", room_id);
+}
+
+window.addEventListener("hashchange", get_hash);
+
+class Game {
+    ws;
+
+    constructor() {
+        let uri = "ws://" + window.location.host + "/api/ws/" + room_id;
+        const ws = new WebSocket(uri)
+        ws.onopen = () => {
+            this.ws = ws;
+            this.sendReady();
+        }
+        ws.onmessage = ({data}) => {
+            if (typeof data === "string") {
+                this.handleMessage(JSON.parse(data));
+            }
+        }
+    }
+
+    handleMessage(msg) {
+        if (msg.Turn !== undefined) {
+            const {to, turn, mode} = msg.Turn;
+            current_turn = turn;
+            if (turn == my_turn) {
+                play_card_btn_enable();
+            }
+
+        } else if (msg.Initial !== undefined) {
+            const {to, cur_turn, hand} = msg.Initial;
+            my_turn = to;
+            current_turn = cur_turn;
+            for (let i = 0; i < 3; i++) {
+                let player = new Player(i, [], []);
+                players.push(player);
+            }
+            for (let c_id in hand) {
+                players[my_turn].hand.push(new Card(c_id));
+            }
+            console.log("my_turn: ", my_turn);
+            let right = (my_turn + 1) % 3;
+            let left = (right + 1) % 3;
+            players[right].name = "right";
+            players[left].name = "left";
+
+            render();
+
+            if (current_turn == my_turn) {
+                play_card_btn_enable();
+            }
+
+        } else if (msg.Draw !== undefined) {
+            const {to, card: id} = msg.Draw;
+            players[my_turn].hand.push(new Card(id));
+            render();
+
+        } else if (msg.Discard !== undefined) {
+            const {to, card: id} = msg.Discard;
+            players[current_turn].out.push(new Card(id));
+            render();
+
+        } else {
+            console.log("unrecognized message");
+        }
+    }
+
+    sendReady() {
+        this.ws.send(`{"Ready": "true"}`);
+    }
+    sendAddRobot() {
+        this.ws.send(`{"AddRobot": "true"}`);
+    }
+    sendStart() {
+        this.ws.send(`{"Start": "true"}`)
+    }
+}
+
+class Card {
+    type;
+    selected;
+    id;
+
+    constructor(id) {
+        this.type = card_face[id / 4];
+        this.selected = false;
+        this.id = id;
+    }
+
 }
 
 function Player(turn, hand, out) {
@@ -34,24 +133,20 @@ let card_face = [
     "佳", "作", "仁", "福", "禄", "寿",
 ];
 
-let cur_turn = 0;
+let current_turn = 0;
 let my_turn = 0;
 let session_id = "";
 
 let cards_arr = [];
 
-let total = [];
-
-
 let players = [];
 
-for (let j = 0; j < card_face.length; j++) {
-    for (let i = 0; i < 4; i++) {
-        let id = j * 4 + i;
-        cards_arr.push(new Card(card_face[j], false, id));
-    }
-}
+let game;
+
 let btn = document.querySelector('#btn');
+let start_btn = document.querySelector('#start');
+let playground = document.querySelector('#playground');
+let room = document.querySelector('#room');
 
 start();
 render();
@@ -72,63 +167,37 @@ async function end() {
 }
 
 
+function render_playground()
+{
+    room.className = "hide";
+    playground.className = "";
+}
+function render_room()
+{
+    room.className = "";
+    playground.className = "hide";
+    if (!room.firstChild.hasChildNodes()) {
+        for (let i = 0; i < 3; i++) {
+            room.firstElementChild.appendChild(create_player_slot(i == 0));
+        }
+        start_btn.addEventListener('click', () => {
+            game.sendStart();
+            render_playground();
+        });
+    }
+}
+
 async function start() {
-    total = cards_arr.map(a => ({...a}));;
-    for (let i = 0; i < 3; i++) {
-        let player = new Player(i, [], []);
-        for (let j = 0; j < 19; j++) {
-            player.hand.push(draw_card());
-        }
-        players.push(player);
-    }
-    my_turn = getRandomInt(3);
-    console.log("my_turn: ", my_turn);
-    let right = (my_turn + 1) % 3;
-    let left = (right + 1) % 3;
-    players[right].name = "right";
-    players[left].name = "left";
+    get_hash();
+    render_room();
 
+    game = new Game();
 
-    let res = await request.get("/new_game", {});
-    session_id = res.data;
-    let initial_url = "/initial/" + session_id;
-    for (let i = 0; i < 3; i++) {
-        if (i != my_turn) {
-            request.post(initial_url, {
-                hand: hand_to_data(players[i].hand),
-                turn: i
-            });
-        }
-    }
-
-    while (my_turn != cur_turn) {
-        await wait_player(players[cur_turn]);
-    }
-    my_turn_begin();
+    // while (my_turn != current_turn) {
+    //     await wait_player(players[current_turn]);
+    // }
 }
 
-function hand_to_data(hand) {
-    let data = [];
-    for (let i = 0; i < hand.length; i++) {
-        data.push(hand[i].id);
-    }
-    return data;
-}
-
-function draw_card() {
-    let ind = getRandomInt(total.length);
-    let card = total[ind];
-    total.splice(ind, 1);
-    return card
-}
-
-function my_turn_begin() {
-    let card = draw_card();
-    let hand = players[my_turn].hand;
-    hand.push(card);
-    render();
-    play_card_btn_enable();
-}
 
 async function play_card() {
     let hand = players[my_turn].hand;
@@ -145,22 +214,22 @@ async function play_card() {
         }
     }
     hide_btn();
-    cur_turn = (cur_turn + 1) % 3;
+    current_turn = (current_turn + 1) % 3;
     await broadcast_discard(card);
 
-    await wait_player(players[cur_turn]);
-    await wait_player(players[cur_turn]);
+    await wait_player(players[current_turn]);
+    await wait_player(players[current_turn]);
 
     my_turn_begin();
 }
 
 async function broadcast_discard(card) {
     for (let i = 0; i < 3; i++) {
-        if (i != my_turn && i != cur_turn) {
+        if (i != my_turn && i != current_turn) {
             request.post("/discard/" + session_id, {
                 card: card.id,
                 turn: i,
-                cur_turn: cur_turn
+                cur_turn: current_turn
             });
         }
     }
@@ -175,7 +244,7 @@ async function wait_player(player) {
         let new_card = draw_card();
         let res = await request.post("/turn/" + session_id, {
             card: new_card.id,
-            turn: cur_turn
+            turn: current_turn
         });
         let is_win = res.data.win;
         if (is_win) {
@@ -187,7 +256,7 @@ async function wait_player(player) {
         let container = document.querySelector("#" + player.name + "-cards");
         append_out(container, card, player.hand);
         broadcast_discard(card);
-        cur_turn = (cur_turn + 1) % 3;
+        current_turn = (current_turn + 1) % 3;
 }
 
 function discard_card(hand, id) {
@@ -244,6 +313,26 @@ function render() {
         group.style.maxHeight = "" + ((group.childNodes.length)*50) + "px";
         container.appendChild(group);
     }
+}
+
+function create_player_slot(is_me) {
+    let div = document.createElement("div");
+    div.id = "player";
+    let img = document.createElement("img");
+    img.src = is_me ? "上大人/user.svg" : "上大人/add.svg";
+    img.id = "icon";
+    if (!is_me) {
+        img.addEventListener('click', () => {
+            console.log("hello", img.src)
+            if (img.src.endsWith("add.svg")) {
+                img.src = "上大人/robot.svg";
+                game.sendAddRobot();
+            }
+        });
+    }
+
+    div.appendChild(img);
+    return div;
 }
 
 function create_card(card, clickable) {

@@ -36,9 +36,9 @@ pub enum Mode {
 
 #[derive(Clone, Serialize, Deserialize)]
 enum ClientMessage {
-    Ready,
-    AddRobot,
-    Start,
+    Ready(bool),
+    AddRobot(bool),
+    Start(bool),
     Discard { card: Card },
     Ding { confirm: bool },
     Wa { confirm: bool },
@@ -423,13 +423,13 @@ impl Game {
             }
         };
         match message {
-            ClientMessage::Ready => {
+            ClientMessage::Ready(_) => {
                 self.state.write().players[id as usize].ready = true;
             }
-            ClientMessage::AddRobot => {
+            ClientMessage::AddRobot(_) => {
                 self.state.write().add_robot();
             }
-            ClientMessage::Start => {
+            ClientMessage::Start(_) => {
                 self.state.write().start()?;
                 let state = self.state.read();
                 for i in 0..3 {
@@ -455,6 +455,11 @@ impl Game {
                             mode: Mode::Normal,
                         }
                     };
+                    self.connection.send(msg).ok();
+                }
+
+                if Mode::Normal == self.state.read().mode {
+                    let msg = self.state.write().draw_card();
                     self.connection.send(msg).ok();
                 }
             }
