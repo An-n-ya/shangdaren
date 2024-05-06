@@ -78,9 +78,7 @@ class Game {
                 let player = new Player(i, [], []);
                 players.push(player);
             }
-            console.log(hand);
             for (let c_id of hand) {
-                console.log(c_id);
                 players[my_turn].hand.push(new Card(c_id));
             }
             console.log("my_turn: ", my_turn);
@@ -102,7 +100,10 @@ class Game {
 
         } else if (msg.Discard !== undefined) {
             const {to, card: id} = msg.Discard;
-            players[current_turn].out.push(new Card(id));
+            let card = new Card(id);
+            players[current_turn].out.push(card);
+            let container = document.querySelector("#" + players[current_turn].name + "-cards");
+            append_out(container, card);
             render();
 
         } else {
@@ -118,6 +119,9 @@ class Game {
     }
     sendStart() {
         this.ws.send(`{"Start": true}`)
+    }
+    sendDiscard(card_id) {
+        this.ws.send(`{"Discard": {"card": ${card_id}}}`)
     }
 }
 
@@ -228,13 +232,8 @@ async function play_card() {
         }
     }
     hide_btn();
-    current_turn = (current_turn + 1) % 3;
-    await broadcast_discard(card);
 
-    await wait_player(players[current_turn]);
-    await wait_player(players[current_turn]);
-
-    my_turn_begin();
+    game.sendDiscard(card.id);
 }
 
 async function broadcast_discard(card) {

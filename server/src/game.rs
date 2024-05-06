@@ -145,6 +145,7 @@ impl GameState {
             }
         }
         self.turn = rand::random::<u8>() % 3;
+        debug!("current turn {}", self.turn);
         Ok(())
     }
 
@@ -227,6 +228,8 @@ impl GameState {
             Right,
             Left,
         }
+
+        debug!("mode: {:?}", self.mode);
 
         match self.mode {
             m @ Mode::Wa(discard) => {
@@ -434,19 +437,22 @@ impl Game {
             }
             ClientMessage::Start(_) => {
                 self.state.write().start()?;
-                let state = self.state.read();
-                for i in 0..3 {
-                    self.connection
-                        .send(ServerMessage::Initial {
-                            to: Some(i),
-                            cur_turn: state.turn,
-                            hand: state.hand_of_player(i as usize),
-                        })
-                        .ok();
+                {
+                    let state = self.state.read();
+                    for i in 0..3 {
+                        self.connection
+                            .send(ServerMessage::Initial {
+                                to: Some(i),
+                                cur_turn: state.turn,
+                                hand: state.hand_of_player(i as usize),
+                            })
+                            .ok();
+                    }
                 }
                 debug!("initial messages have sent");
-                return Ok(());
                 loop {
+                    let is_robot_turn = self.state.read().is_robot_turn();
+                    debug!("is robot turn {is_robot_turn}");
                     if !self.state.read().is_robot_turn() {
                         break;
                     }
@@ -465,6 +471,7 @@ impl Game {
 
                 if Mode::Normal == self.state.read().mode {
                     let msg = self.state.write().draw_card();
+                    debug!("write draw card message success");
                     self.connection.send(msg).ok();
                 }
             }
