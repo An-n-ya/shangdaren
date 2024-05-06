@@ -2,7 +2,7 @@ import {defineConfig} from 'vite'
 export default defineConfig({
     server: {
         proxy: {
-            '/api': 'http://localhost:3131'
+            '/api': 'ws://localhost:3131'
         }
     }
 })

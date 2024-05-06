@@ -1,3 +1,4 @@
+use log::debug;
 use warp::{filters::ws::Ws, reject::Rejection, reply::Reply};
 
 use crate::{room::Room, GlobalState};
@@ -8,6 +9,7 @@ pub async fn socket_handler(
     state: GlobalState,
 ) -> Result<impl Reply, Rejection> {
     use dashmap::mapref::entry::Entry;
+    debug!("id: {id}");
 
     let entry = match state.rooms.entry(id.clone()) {
         Entry::Occupied(e) => e.into_ref(),

@@ -6,7 +6,7 @@ use crate::{
 };
 use anyhow::{bail, Context, Ok, Result};
 use futures::prelude::*;
-use log::warn;
+use log::{debug, info, warn};
 use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
 use tokio::sync::broadcast::{self, Sender};
@@ -27,14 +27,14 @@ struct GameState {
     jing: Card,
     mode: Mode,
 }
-#[derive(Deserialize, Serialize, Clone, Copy, PartialEq, Eq)]
+#[derive(Deserialize, Serialize, Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Mode {
     Wa(Card),
     Ding(Card),
     Normal,
 }
 
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize, Debug)]
 enum ClientMessage {
     Ready(bool),
     AddRobot(bool),
@@ -43,7 +43,7 @@ enum ClientMessage {
     Ding { confirm: bool },
     Wa { confirm: bool },
 }
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize, Debug)]
 enum ServerMessage {
     Turn {
         to: Option<u8>,
@@ -398,6 +398,7 @@ impl Game {
             tokio::select! {
                 update = rx.recv() => {
                     let update = update.unwrap();
+                    debug!("server message {update:?}");
                     if update.is_broadcast() || update.to().is_some() && update.to().unwrap() == id {
                         socket.send(update.into()).await?;
                     }
@@ -416,12 +417,14 @@ impl Game {
     }
 
     async fn handle_message(&self, id: u8, message: Message) -> Result<()> {
+        debug!("message {}", message.to_str().unwrap());
         let message: ClientMessage = match message.to_str() {
             Err(()) => return Ok(()),
             ::std::result::Result::Ok(text) => {
                 serde_json::from_str(text).context("failed to deserialized client message")?
             }
         };
+        debug!("message {message:?}");
         match message {
             ClientMessage::Ready(_) => {
                 self.state.write().players[id as usize].ready = true;
@@ -441,6 +444,8 @@ impl Game {
                         })
                         .ok();
                 }
+                debug!("initial messages have sent");
+                return Ok(());
                 loop {
                     if !self.state.read().is_robot_turn() {
                         break;

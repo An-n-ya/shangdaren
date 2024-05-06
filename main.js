@@ -36,17 +36,30 @@ class Game {
     ws;
 
     constructor() {
-        let uri = "ws://" + window.location.host + "/api/ws/" + room_id;
-        const ws = new WebSocket(uri)
-        ws.onopen = () => {
-            this.ws = ws;
-            this.sendReady();
-        }
-        ws.onmessage = ({data}) => {
-            if (typeof data === "string") {
-                this.handleMessage(JSON.parse(data));
+        this.tryConnect();
+        window.setInterval(() => this.tryConnect(), 2);
+    }
+
+    tryConnect() {
+        if (this.ws == undefined) {
+            let uri = "ws://" + window.location.host + "/api/ws/" + room_id;
+            const ws = new WebSocket(uri)
+            ws.onopen = () => {
+                this.ws = ws;
+                this.sendReady();
+            }
+            ws.onmessage = ({data}) => {
+                if (typeof data === "string") {
+                    this.handleMessage(JSON.parse(data));
+                }
+            }
+            ws.onclose = () => {
+                if (this.ws) {
+                    this.ws = undefined;
+                }
             }
         }
+
     }
 
     handleMessage(msg) {
@@ -65,7 +78,9 @@ class Game {
                 let player = new Player(i, [], []);
                 players.push(player);
             }
-            for (let c_id in hand) {
+            console.log(hand);
+            for (let c_id of hand) {
+                console.log(c_id);
                 players[my_turn].hand.push(new Card(c_id));
             }
             console.log("my_turn: ", my_turn);
@@ -96,13 +111,13 @@ class Game {
     }
 
     sendReady() {
-        this.ws.send(`{"Ready": "true"}`);
+        this.ws.send(`{"Ready": true}`);
     }
     sendAddRobot() {
-        this.ws.send(`{"AddRobot": "true"}`);
+        this.ws.send(`{"AddRobot": true}`);
     }
     sendStart() {
-        this.ws.send(`{"Start": "true"}`)
+        this.ws.send(`{"Start": true}`)
     }
 }
 
@@ -112,7 +127,7 @@ class Card {
     id;
 
     constructor(id) {
-        this.type = card_face[id / 4];
+        this.type = card_face[Math.floor(id / 4)];
         this.selected = false;
         this.id = id;
     }
@@ -149,7 +164,6 @@ let playground = document.querySelector('#playground');
 let room = document.querySelector('#room');
 
 start();
-render();
 
 function getRandomInt(max) {
     while (true) {
@@ -275,9 +289,11 @@ function hide_btn() {
 }
 
 function sort_hand() {
+    if (players.length > 0) {
     players[my_turn].hand.sort((a, b) =>
         a.id - b.id
     )
+    }
 }
 
 function append_out(container, card) {

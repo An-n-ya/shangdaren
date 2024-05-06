@@ -26,6 +26,10 @@ impl GlobalState {
 
 #[tokio::main]
 async fn main() {
+    let mut builder = env_logger::Builder::from_default_env();
+    builder.target(env_logger::Target::Stdout);
+
+    builder.init();
     let w = warp::path!("api" / "ws" / String)
         .and(warp::ws())
         .and(warp::any().map(move || GlobalState::new()))
