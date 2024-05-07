@@ -14,11 +14,16 @@ pub struct Agent {
     pub turn: u8,
     pub is_robot: bool,
     pub ready: bool,
+    pub test: bool,
 }
 
 impl Agent {
     pub fn discard_card(&mut self) -> Card {
-        let index = rand::random::<usize>() % self.hand.len();
+        let index = if !self.test {
+            rand::random::<usize>() % self.hand.len()
+        } else {
+            0
+        };
         let card = *self.hand.get(index).unwrap();
         self.out.push(card);
 
