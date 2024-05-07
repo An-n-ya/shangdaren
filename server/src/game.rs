@@ -6,7 +6,7 @@ use crate::{
 };
 use anyhow::{bail, Context, Ok, Result};
 use futures::prelude::*;
-use log::{debug, info, warn};
+use log::{debug, warn};
 use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
 use tokio::sync::broadcast::{self, Sender};
@@ -528,5 +528,50 @@ impl Game {
             }
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use warp::{test::WsClient, Filter};
+
+    use crate::{handler::socket_handler, GlobalState};
+
+    use super::*;
+
+    async fn connect() -> WsClient {
+        let w = warp::path!("api" / "ws" / String)
+            .and(warp::ws())
+            .and(warp::any().map(move || GlobalState::new()))
+            .and_then(socket_handler);
+        let client = warp::test::ws()
+            .path(&format!("/api/ws/{}", "test"))
+            .handshake(w)
+            .await
+            .unwrap();
+        client
+    }
+
+    #[tokio::test]
+    async fn test_ding() {
+        let mut client = connect().await;
+        let msg = ClientMessage::Ready(true);
+        client.send_text(serde_json::to_string(&msg).unwrap()).await;
+        for _ in 0..2 {
+            let msg = ClientMessage::AddRobot(true);
+            client.send_text(serde_json::to_string(&msg).unwrap()).await;
+        }
+        let msg = ClientMessage::Start(true);
+        client.send_text(serde_json::to_string(&msg).unwrap()).await;
+        let s_msg = client.recv().await.unwrap();
+        let s_msg = s_msg.to_str().unwrap();
+        let s_msg: ServerMessage = serde_json::from_str(s_msg).unwrap();
+        let is_initial = match s_msg {
+            ServerMessage::Turn { .. } => false,
+            ServerMessage::Initial { .. } => true,
+            ServerMessage::Draw { .. } => false,
+            ServerMessage::Discard { .. } => false,
+        };
+        assert_eq!(is_initial, true);
     }
 }
