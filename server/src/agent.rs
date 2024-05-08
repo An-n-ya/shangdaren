@@ -32,7 +32,10 @@ impl Agent {
         card
     }
 
-    pub fn wa_card(&mut self, card: Card) -> bool {
+    pub fn pao_card(&mut self, card: Card) -> bool {
+        if self.test {
+            return false;
+        }
         let res = rand::random::<u8>() % 2 == 1;
         if res {
             self.pairing.push(Pairing::Quadlet(card));
@@ -51,7 +54,11 @@ impl Agent {
         res
     }
     pub fn ding_card(&mut self, card: Card) -> bool {
-        let res = rand::random::<u8>() % 2 == 1;
+        let res = if self.test {
+            true
+        } else {
+            rand::random::<u8>() % 2 == 1
+        };
         if res {
             self.pairing.push(Pairing::Triplet(card));
             let mut index = vec![];

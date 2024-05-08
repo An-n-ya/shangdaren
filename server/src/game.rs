@@ -21,6 +21,7 @@ pub struct Game {
 struct GameState {
     pub players: Vec<Agent>,
     remaining_cards: Vec<Card>,
+    #[allow(unused)]
     round: u8,
     pub turn: u8,
     prev_turn: Option<u8>,
@@ -30,7 +31,7 @@ struct GameState {
 }
 #[derive(Deserialize, Serialize, Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Mode {
-    Wa(Card),
+    Pao(Card),
     Ding(Card),
     Normal,
 }
@@ -43,7 +44,7 @@ enum ClientMessage {
     Start(bool),
     Discard { card: Card },
     Ding { confirm: bool },
-    Wa { confirm: bool },
+    Pao { confirm: bool },
 }
 #[derive(Clone, Serialize, Deserialize, Debug)]
 enum ServerMessage {
@@ -61,7 +62,7 @@ enum ServerMessage {
         to: Option<u8>,
         card: Card,
     },
-    Wa {
+    Pao {
         to: Option<u8>,
         card: Card,
     },
@@ -89,7 +90,7 @@ impl ServerMessage {
             ServerMessage::Initial { to, .. } => to.is_none(),
             ServerMessage::Draw { to, .. } => to.is_none(),
             ServerMessage::Discard { to, .. } => to.is_none(),
-            ServerMessage::Wa { to, .. } => to.is_none(),
+            ServerMessage::Pao { to, .. } => to.is_none(),
             ServerMessage::Ding { to, .. } => to.is_none(),
         }
     }
@@ -100,7 +101,7 @@ impl ServerMessage {
             ServerMessage::Initial { to, .. } => *to,
             ServerMessage::Draw { to, .. } => *to,
             ServerMessage::Discard { to, .. } => *to,
-            ServerMessage::Wa { to, .. } => *to,
+            ServerMessage::Pao { to, .. } => *to,
             ServerMessage::Ding { to, .. } => *to,
         }
     }
@@ -185,17 +186,6 @@ impl GameState {
     pub fn next_turn(&mut self, discard: &Card) -> ServerMessage {
         let next_player = ((self.turn + 1) % Self::PLAYER_NUM) as usize;
         let prev_player = ((next_player as u8 + 1) % Self::PLAYER_NUM) as usize;
-        if discard.0 == 19 {
-            debug!("next_player {}, prev_player {}", next_player, prev_player);
-            debug!(
-                "can next player form qualet {}",
-                Self::can_form_quadlet(&self.players[next_player].hand, discard)
-            );
-            debug!(
-                "can prev player form qualet {}",
-                Self::can_form_quadlet(&self.players[prev_player].hand, discard)
-            );
-        }
         self.prev_turn = Some((self.turn + 1) % Self::PLAYER_NUM);
         if Self::can_form_triplet(&self.players[next_player].hand, discard) {
             self.turn = next_player as u8;
@@ -207,11 +197,11 @@ impl GameState {
             }
         } else if Self::can_form_quadlet(&self.players[next_player].hand, discard) {
             self.turn = next_player as u8;
-            self.mode = Mode::Wa(*discard);
+            self.mode = Mode::Pao(*discard);
             ServerMessage::Turn {
                 to: None,
                 turn: self.turn,
-                mode: Mode::Wa(*discard),
+                mode: Mode::Pao(*discard),
             }
         } else if Self::can_form_triplet(&self.players[prev_player].hand, discard) {
             self.turn = prev_player as u8;
@@ -223,13 +213,14 @@ impl GameState {
             }
         } else if Self::can_form_quadlet(&self.players[prev_player].hand, discard) {
             self.turn = prev_player as u8;
-            self.mode = Mode::Wa(*discard);
+            self.mode = Mode::Pao(*discard);
             ServerMessage::Turn {
                 to: None,
                 turn: self.turn,
-                mode: Mode::Wa(*discard),
+                mode: Mode::Pao(*discard),
             }
         } else {
+            debug!("[next_turn] self.turn {}", self.turn);
             self.turn = (self.turn + 1) % Self::PLAYER_NUM;
             self.mode = Mode::Normal;
             ServerMessage::Turn {
@@ -255,6 +246,7 @@ impl GameState {
 
     pub fn robot_turn(&mut self, con: &Sender<ServerMessage>) -> Option<Card> {
         assert!(self.is_robot_turn());
+        #[allow(unused)]
         let mut card = Card(0);
         let right = (self.turn + 1) % Self::PLAYER_NUM;
         let left = (right + 1) % Self::PLAYER_NUM;
@@ -267,9 +259,9 @@ impl GameState {
         debug!("mode: {:?}", self.mode);
 
         match self.mode {
-            m @ Mode::Wa(discard) => {
-                if self.players[self.turn as usize].wa_card(discard) {
-                    for (pos, n) in [(Pos::Right, right), (Pos::Left, left)] {
+            Mode::Pao(discard) => {
+                if self.players[self.turn as usize].pao_card(discard) {
+                    for (pos, _) in [(Pos::Right, right), (Pos::Left, left)] {
                         let is_robot = match pos {
                             Pos::Right => {
                                 if self.players[right as usize].is_robot {
@@ -293,10 +285,9 @@ impl GameState {
                             }
                         };
                         if !is_robot {
-                            con.send(ServerMessage::Turn {
-                                to: Some(n),
-                                turn: self.turn,
-                                mode: m,
+                            con.send(ServerMessage::Pao {
+                                to: None,
+                                card: discard,
                             })
                             .ok();
                         }
@@ -310,9 +301,9 @@ impl GameState {
                     return None;
                 }
             }
-            m @ Mode::Ding(discard) => {
+            Mode::Ding(discard) => {
                 if self.players[self.turn as usize].ding_card(discard) {
-                    for (pos, n) in [(Pos::Right, right), (Pos::Left, left)] {
+                    for (pos, _) in [(Pos::Right, right), (Pos::Left, left)] {
                         let is_robot = match pos {
                             Pos::Right => {
                                 if self.players[right as usize].is_robot {
@@ -336,10 +327,9 @@ impl GameState {
                             }
                         };
                         if !is_robot {
-                            con.send(ServerMessage::Turn {
-                                to: Some(n),
-                                turn: self.turn,
-                                mode: m,
+                            con.send(ServerMessage::Ding {
+                                to: None,
+                                card: discard,
                             })
                             .ok();
                         }
@@ -546,8 +536,23 @@ impl Game {
                 if !confirm {
                     let msg = self.state.write().restore_turn();
                     self.connection.send(msg).ok();
-                    while self.state.read().is_robot_turn() {
-                        self.state.write().robot_turn(&self.connection);
+                    loop {
+                        let is_robot_turn = self.state.read().is_robot_turn();
+                        debug!("is robot turn {is_robot_turn}");
+                        if !is_robot_turn {
+                            break;
+                        }
+                        let card = self.state.write().robot_turn(&self.connection);
+                        let msg = if let Some(card) = card {
+                            self.state.write().next_turn(&card)
+                        } else {
+                            ServerMessage::Turn {
+                                to: None,
+                                turn: self.state.read().turn,
+                                mode: Mode::Normal,
+                            }
+                        };
+                        self.connection.send(msg).ok();
                     }
                 } else {
                     let card = match mode {
@@ -560,21 +565,39 @@ impl Game {
                 let msg = self.state.write().draw_card();
                 self.connection.send(msg).ok();
             }
-            ClientMessage::Wa { confirm } => {
+            ClientMessage::Pao { confirm } => {
                 let mode = self.state.read().mode.clone();
                 self.state.write().mode = Mode::Normal;
                 if !confirm {
                     let msg = self.state.write().restore_turn();
                     self.connection.send(msg).ok();
-                    while self.state.read().is_robot_turn() {
-                        self.state.write().robot_turn(&self.connection);
+                    loop {
+                        let is_robot_turn = self.state.read().is_robot_turn();
+                        debug!(
+                            "[pao]is robot turn {is_robot_turn}, turn {}",
+                            self.state.read().turn
+                        );
+                        if !is_robot_turn {
+                            break;
+                        }
+                        let card = self.state.write().robot_turn(&self.connection);
+                        let msg = if let Some(card) = card {
+                            self.state.write().next_turn(&card)
+                        } else {
+                            ServerMessage::Turn {
+                                to: None,
+                                turn: self.state.read().turn,
+                                mode: Mode::Normal,
+                            }
+                        };
+                        self.connection.send(msg).ok();
                     }
                 } else {
                     let card = match mode {
-                        Mode::Wa(c) => c,
+                        Mode::Pao(c) => c,
                         _ => bail!("wrong mode, expect Wa mode, got {:?}", mode),
                     };
-                    let msg = ServerMessage::Wa { to: None, card };
+                    let msg = ServerMessage::Pao { to: None, card };
                     self.connection.send(msg).ok();
                 }
                 let msg = self.state.write().draw_card();
@@ -604,13 +627,72 @@ mod tests {
             let s_msg: ServerMessage = serde_json::from_str(s_msg).unwrap();
             s_msg
         }
+
+        pub async fn expect_draw(&mut self, expect_card: Card) {
+            let msg = self.recv().await;
+            match msg {
+                ServerMessage::Draw { to, card } => {
+                    assert_eq!(to.unwrap(), 0);
+                    assert_eq!(card, expect_card);
+                }
+                _ => panic!("expect draw message, got {msg:?}"),
+            }
+        }
+        pub async fn expect_turn(&mut self, expect_turn: u8, expect_mode: Mode) {
+            let msg = self.recv().await;
+            match msg {
+                ServerMessage::Turn { to, turn, mode } => {
+                    assert_eq!(to.is_none(), true);
+                    assert_eq!(turn, expect_turn);
+                    assert_eq!(mode, expect_mode);
+                }
+                _ => panic!("expect turn message, got {msg:?}"),
+            }
+        }
+        pub async fn expect_discard(&mut self, expect_card: Card) {
+            let msg = self.recv().await;
+            match msg {
+                ServerMessage::Discard { to, card } => {
+                    assert_eq!(to.unwrap(), 0);
+                    assert_eq!(card, expect_card);
+                }
+                _ => panic!("expect discard message, got {msg:?}"),
+            }
+        }
+        pub async fn expect_ding(&mut self, expect_card: Card) {
+            let msg = self.recv().await;
+            match msg {
+                ServerMessage::Ding { to, card } => {
+                    assert!(to.is_none());
+                    assert_eq!(card, expect_card);
+                }
+                _ => panic!("expect ding message, got {msg:?}"),
+            }
+        }
+        pub async fn expect_pao(&mut self, expect_card: Card) {
+            let msg = self.recv().await;
+            match msg {
+                ServerMessage::Pao { to, card } => {
+                    assert!(to.is_none());
+                    assert_eq!(card, expect_card);
+                }
+                _ => panic!("expect pao message, got {msg:?}"),
+            }
+        }
+        pub async fn expect_initial(&mut self, expect_turn: u8, expect_hand: &Vec<Card>) {
+            let msg = self.recv().await;
+            match msg {
+                ServerMessage::Initial { to, cur_turn, hand } => {
+                    assert_eq!(to.unwrap(), 0);
+                    assert_eq!(cur_turn, expect_turn);
+                    assert_eq!(&hand, expect_hand);
+                }
+                _ => panic!("expect initial message, got {msg:?}"),
+            }
+        }
     }
 
     async fn connect() -> JsonWsClient {
-        let mut builder = env_logger::Builder::from_default_env();
-        builder.target(env_logger::Target::Stdout);
-
-        builder.init();
         let w = warp::path!("api" / "ws" / String)
             .and(warp::ws())
             .and(warp::any().map(move || GlobalState::new()))
@@ -623,8 +705,12 @@ mod tests {
         JsonWsClient(client)
     }
 
-    // #[tokio::test]
+    #[tokio::test]
     async fn basic_test1() {
+        let mut builder = env_logger::Builder::from_default_env();
+        builder.target(env_logger::Target::Stdout);
+        builder.init();
+
         let mut client = connect().await;
         client.send(ClientMessage::Test(true)).await;
         client.send(ClientMessage::Ready(true)).await;
@@ -632,56 +718,26 @@ mod tests {
             client.send(ClientMessage::AddRobot(true)).await;
         }
         client.send(ClientMessage::Start(true)).await;
-        let s_msg = client.recv().await;
         let initial_hand: Vec<Card> = (0..19).into_iter().map(|n| Card(n)).collect();
-        let is_initial = match s_msg {
-            ServerMessage::Initial { to, cur_turn, hand } => {
-                assert_eq!(to.unwrap(), 0);
-                assert_eq!(cur_turn, 0);
-                assert_eq!(hand, initial_hand);
-                true
-            }
-            _ => false,
-        };
-        assert_eq!(is_initial, true);
+        client.expect_initial(0, &initial_hand).await;
 
-        let draw_msg = client.recv().await;
-        match draw_msg {
-            ServerMessage::Draw { to, card } => {
-                assert_eq!(to.unwrap(), 0);
-                assert_eq!(card, Card(57));
-            }
-            _ => panic!("expect draw message, got {:?}", draw_msg),
-        }
+        client.expect_draw(Card(57)).await;
+
         client.send(ClientMessage::Discard { card: Card(57) }).await;
-        let turn_msg = client.recv().await;
-        match turn_msg {
-            ServerMessage::Turn { to, turn, mode } => {
-                assert!(to.is_none());
-                assert_eq!(turn, 1);
-                assert_eq!(mode, Mode::Normal);
-            }
-            _ => panic!("expect turn message, got {:?}", turn_msg),
-        }
-        let discard_msg = client.recv().await;
-        match discard_msg {
-            ServerMessage::Discard { to, card } => {
-                assert_eq!(to.unwrap(), 0);
-                assert_eq!(card, Card(19));
-            }
-            _ => panic!("expect discard message, got {:?}", discard_msg),
-        }
-        let turn_msg = client.recv().await;
-        println!("{:?}", turn_msg);
-        match turn_msg {
-            ServerMessage::Turn { to, turn, mode } => {
-                assert!(to.is_none());
-                assert_eq!(turn, 0);
-                assert_eq!(mode, Mode::Wa(Card(19)));
-            }
-            _ => panic!("expect turn message, got {:?}", turn_msg),
-        }
-        client.send(ClientMessage::Wa { confirm: false }).await;
+        client.expect_turn(1, Mode::Normal).await;
+        client.expect_discard(Card(19)).await;
+        client.expect_turn(0, Mode::Pao(Card(19))).await;
+
+        client.send(ClientMessage::Pao { confirm: false }).await;
+        client.expect_turn(2, Mode::Normal).await;
+        client.expect_discard(Card(38)).await;
+        client.expect_turn(1, Mode::Ding(Card(38))).await;
+        client.expect_ding(Card(38)).await;
+        client.expect_discard(Card(20)).await;
+        client.expect_turn(2, Mode::Normal).await;
+        client.expect_discard(Card(39)).await;
+        client.expect_turn(0, Mode::Normal).await;
+        client.expect_draw(Card(61)).await;
     }
 
     #[tokio::test]
@@ -693,88 +749,18 @@ mod tests {
             client.send(ClientMessage::AddRobot(true)).await;
         }
         client.send(ClientMessage::Start(true)).await;
-        let s_msg = client.recv().await;
         let initial_hand: Vec<Card> = (0..19).into_iter().map(|n| Card(n)).collect();
-        let is_initial = match s_msg {
-            ServerMessage::Initial { to, cur_turn, hand } => {
-                assert_eq!(to.unwrap(), 0);
-                assert_eq!(cur_turn, 0);
-                assert_eq!(hand, initial_hand);
-                true
-            }
-            _ => false,
-        };
-        assert_eq!(is_initial, true);
+        client.expect_initial(0, &initial_hand).await;
 
-        let draw_msg = client.recv().await;
-        match draw_msg {
-            ServerMessage::Draw { to, card } => {
-                assert_eq!(to.unwrap(), 0);
-                assert_eq!(card, Card(57));
-            }
-            _ => panic!("expect draw message, got {:?}", draw_msg),
-        }
+        client.expect_draw(Card(57)).await;
+
         client.send(ClientMessage::Discard { card: Card(57) }).await;
-        let turn_msg = client.recv().await;
-        match turn_msg {
-            ServerMessage::Turn { to, turn, mode } => {
-                assert!(to.is_none());
-                assert_eq!(turn, 1);
-                assert_eq!(mode, Mode::Normal);
-            }
-            _ => panic!("expect turn message, got {:?}", turn_msg),
-        }
-        let discard_msg = client.recv().await;
-        match discard_msg {
-            ServerMessage::Discard { to, card } => {
-                assert_eq!(to.unwrap(), 0);
-                assert_eq!(card, Card(19));
-            }
-            _ => panic!("expect discard message, got {:?}", discard_msg),
-        }
-        let turn_msg = client.recv().await;
-        println!("{:?}", turn_msg);
-        match turn_msg {
-            ServerMessage::Turn { to, turn, mode } => {
-                assert!(to.is_none());
-                assert_eq!(turn, 0);
-                assert_eq!(mode, Mode::Wa(Card(19)));
-            }
-            _ => panic!("expect turn message, got {:?}", turn_msg),
-        }
-        client.send(ClientMessage::Wa { confirm: true }).await;
-        let wa_msg = client.recv().await;
-        match wa_msg {
-            ServerMessage::Wa { to, card } => {
-                assert!(to.is_none());
-                assert_eq!(card, Card(19));
-            }
-            _ => panic!("expect wa message, got {:?}", wa_msg),
-        }
-        let draw_msg = client.recv().await;
-        match draw_msg {
-            ServerMessage::Draw { to, card } => {
-                assert_eq!(to.unwrap(), 0);
-                assert_eq!(card, Card(59));
-            }
-            _ => panic!("expect draw message, got {:?}", draw_msg),
-        }
-        // let turn_msg = client.recv().await;
-        // match turn_msg {
-        //     ServerMessage::Turn { to, turn, mode } => {
-        //         assert!(to.is_none());
-        //         assert_eq!(turn, 2);
-        //         assert_eq!(mode, Mode::Normal);
-        //     }
-        //     _ => panic!("expect turn message, got {:?}", turn_msg),
-        // }
-        // let discard_msg = client.recv().await;
-        // match discard_msg {
-        //     ServerMessage::Discard { to, card } => {
-        //         assert_eq!(to.unwrap(), 0);
-        //         assert_eq!(card, Card(38));
-        //     }
-        //     _ => panic!("expect discard message, got {:?}", discard_msg),
-        // }
+        client.expect_turn(1, Mode::Normal).await;
+        client.expect_discard(Card(19)).await;
+        client.expect_turn(0, Mode::Pao(Card(19))).await;
+
+        client.send(ClientMessage::Pao { confirm: true }).await;
+        client.expect_pao(Card(19)).await;
+        client.expect_draw(Card(59)).await;
     }
 }
