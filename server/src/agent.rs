@@ -67,7 +67,7 @@ impl Agent {
                     index.push(i);
                 }
             }
-            assert!(index.len() == 2);
+            assert_eq!(index.len(), 2);
             for i in 0..2 {
                 self.hand.remove(index[i] - i);
             }

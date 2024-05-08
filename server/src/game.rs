@@ -187,29 +187,13 @@ impl GameState {
         let next_player = ((self.turn + 1) % Self::PLAYER_NUM) as usize;
         let prev_player = ((next_player as u8 + 1) % Self::PLAYER_NUM) as usize;
         self.prev_turn = Some((self.turn + 1) % Self::PLAYER_NUM);
-        if Self::can_form_triplet(&self.players[next_player].hand, discard) {
-            self.turn = next_player as u8;
-            self.mode = Mode::Ding(*discard);
-            ServerMessage::Turn {
-                to: None,
-                turn: self.turn,
-                mode: Mode::Ding(*discard),
-            }
-        } else if Self::can_form_quadlet(&self.players[next_player].hand, discard) {
+        if Self::can_form_quadlet(&self.players[next_player].hand, discard) {
             self.turn = next_player as u8;
             self.mode = Mode::Pao(*discard);
             ServerMessage::Turn {
                 to: None,
                 turn: self.turn,
                 mode: Mode::Pao(*discard),
-            }
-        } else if Self::can_form_triplet(&self.players[prev_player].hand, discard) {
-            self.turn = prev_player as u8;
-            self.mode = Mode::Ding(*discard);
-            ServerMessage::Turn {
-                to: None,
-                turn: self.turn,
-                mode: Mode::Ding(*discard),
             }
         } else if Self::can_form_quadlet(&self.players[prev_player].hand, discard) {
             self.turn = prev_player as u8;
@@ -218,6 +202,22 @@ impl GameState {
                 to: None,
                 turn: self.turn,
                 mode: Mode::Pao(*discard),
+            }
+        } else if Self::can_form_triplet(&self.players[next_player].hand, discard) {
+            self.turn = next_player as u8;
+            self.mode = Mode::Ding(*discard);
+            ServerMessage::Turn {
+                to: None,
+                turn: self.turn,
+                mode: Mode::Ding(*discard),
+            }
+        } else if Self::can_form_triplet(&self.players[prev_player].hand, discard) {
+            self.turn = prev_player as u8;
+            self.mode = Mode::Ding(*discard);
+            ServerMessage::Turn {
+                to: None,
+                turn: self.turn,
+                mode: Mode::Ding(*discard),
             }
         } else {
             debug!("[next_turn] self.turn {}", self.turn);

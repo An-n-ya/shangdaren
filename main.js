@@ -46,6 +46,7 @@ class Game {
             const ws = new WebSocket(uri)
             ws.onopen = () => {
                 this.ws = ws;
+                this.sendTest();
                 this.sendReady();
             }
             ws.onmessage = ({data}) => {
@@ -67,7 +68,20 @@ class Game {
             const {to, turn, mode} = msg.Turn;
             current_turn = turn;
             if (turn == my_turn) {
-                play_card_btn_enable();
+                console.log("[handleMessage] mode:", mode);
+                if (mode == "Normal") {
+                    play_card_btn_enable("出牌");
+                } else {
+                    if (mode.Pao != undefined) {
+                        cur_pao_or_ding = mode.Pao;
+                        console.log("cur_pao_or_ding", cur_pao_or_ding);
+                        play_card_btn_enable("抛");
+                    } else if (mode.Ding != undefined) {
+                        cur_pao_or_ding = mode.Ding;
+                        console.log("cur_pao_or_ding", cur_pao_or_ding);
+                        play_card_btn_enable("钉");
+                    }
+                }
             }
 
         } else if (msg.Initial !== undefined) {
@@ -90,13 +104,16 @@ class Game {
             render();
 
             if (current_turn == my_turn) {
-                play_card_btn_enable();
+                play_card_btn_enable("出牌");
             }
 
         } else if (msg.Draw !== undefined) {
             const {to, card: id} = msg.Draw;
             players[my_turn].hand.push(new Card(id));
             render();
+            if (current_turn == my_turn) {
+                play_card_btn_enable("出牌");
+            }
 
         } else if (msg.Discard !== undefined) {
             const {to, card: id} = msg.Discard;
@@ -106,11 +123,22 @@ class Game {
             append_out(container, card);
             render();
 
+        } else if (msg.Pao !== undefined){
+            const {to, card: id} = msg.Pao;
+            if (to == my_turn) {return;}
+            let card = new Card(id);
+        } else if (msg.Ding !== undefined){
+            const {to, card: id} = msg.Ding;
+            if (to == my_turn) {return;}
+            let card = new Card(id);
         } else {
             console.log("unrecognized message");
         }
     }
 
+    sendTest() {
+        this.ws.send(`{"Test": true}`);
+    }
     sendReady() {
         this.ws.send(`{"Ready": true}`);
     }
@@ -122,6 +150,12 @@ class Game {
     }
     sendDiscard(card_id) {
         this.ws.send(`{"Discard": {"card": ${card_id}}}`)
+    }
+    sendPao(confirm) {
+        this.ws.send(`{"Pao": {"confirm": ${confirm}}}`)
+    }
+    sendDing(confirm) {
+        this.ws.send(`{"Ding": {"confirm": ${confirm}}}`)
     }
 }
 
@@ -155,14 +189,14 @@ let card_face = [
 let current_turn = 0;
 let my_turn = 0;
 let session_id = "";
-
-let cards_arr = [];
+let cur_pao_or_ding;
 
 let players = [];
 
 let game;
 
-let btn = document.querySelector('#btn');
+let play_btn = document.querySelector('#play-btn');
+let cancel_btn = document.querySelector('#cancel-btn');
 let start_btn = document.querySelector('#start');
 let playground = document.querySelector('#playground');
 let room = document.querySelector('#room');
@@ -217,7 +251,7 @@ async function start() {
 }
 
 
-async function play_card() {
+function play_card() {
     let hand = players[my_turn].hand;
     let card = undefined;
     for (let i = 0; i < hand.length; i++) {
@@ -236,6 +270,7 @@ async function play_card() {
     game.sendDiscard(card.id);
 }
 
+
 async function broadcast_discard(card) {
     for (let i = 0; i < 3; i++) {
         if (i != my_turn && i != current_turn) {
@@ -248,10 +283,6 @@ async function broadcast_discard(card) {
     }
 }
 
-function play_card_btn_enable() {
-    btn.removeAttribute("hidden");
-    btn.addEventListener('click', play_card);
-}
 
 async function wait_player(player) {
         let new_card = draw_card();
@@ -281,10 +312,60 @@ function discard_card(hand, id) {
         }
     }
 }
+function discard_type(hand, id) {
+    console.log("discard_type, hand:", hand, "id:", id);
+    let index = [];
+    for (let i = 0 ; i < hand.length; i++) {
+        if (Math.floor(hand[i].id / 4) == Math.floor(id / 4)) {
+            index.push(i);
+            let card = hand[i];
+        }
+    }
+    hand.splice(index[0], index.length);
+    console.log("discard_type, hand:", hand, "index:", index);
+}
+
+function play_card_btn_enable(action) {
+    play_btn.removeAttribute("hidden");
+    if (action == "出牌") {
+        play_btn.textContent = action;
+        play_btn.addEventListener('click', play_btn.play=play_card, false);
+    } else if (action == "抛") {
+        cancel_btn.removeAttribute("hidden");
+        play_btn.textContent = action;
+        play_btn.addEventListener('click', play_btn.play=function play() {
+            game.sendPao(true);
+            discard_type(players[current_turn].hand, cur_pao_or_ding);
+            render();
+            // TODO: remove other same card
+            hide_btn();
+        }, false);
+        cancel_btn.addEventListener('click', cancel_btn.cancel=function cancel() {
+            game.sendPao(false);
+            hide_btn();
+        }, false)
+    } else if (action == "钉") {
+        cancel_btn.removeAttribute("hidden");
+        play_btn.textContent = action;
+        play_btn.addEventListener('click', play_btn.play=function play() {
+            game.sendDing(true);
+            discard_type(players[current_turn].hand, cur_pao_or_ding);
+            render();
+            // TODO: remove other same card
+            hide_btn();
+        }, false);
+        cancel_btn.addEventListener('click', cancel_btn.cancel=function cancel() {
+            game.sendDing(false);
+            hide_btn();
+        }, false)
+    }
+}
 
 function hide_btn() {
-    btn.setAttribute("hidden", "true");
-    btn.removeEventListener("click", play_card);
+    play_btn.setAttribute("hidden", "true");
+    cancel_btn.setAttribute("hidden", "true");
+    play_btn.removeEventListener("click", play_btn.play, false);
+    cancel_btn.removeEventListener("click", cancel_btn.cancel, false);
 }
 
 function sort_hand() {
