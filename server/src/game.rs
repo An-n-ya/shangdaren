@@ -256,7 +256,7 @@ impl GameState {
             Left,
         }
 
-        debug!("mode: {:?}", self.mode);
+        debug!("[robot_turn] mode: {:?}", self.mode);
 
         match self.mode {
             Mode::Pao(discard) => {
@@ -426,7 +426,7 @@ impl Game {
             tokio::select! {
                 update = rx.recv() => {
                     let update = update.unwrap();
-                    debug!("server message {update:?}");
+                    debug!("[send message] {update:?}");
                     if update.is_broadcast() || update.to().is_some() && update.to().unwrap() == id {
                         socket.send(update.into()).await?;
                     }
@@ -444,15 +444,38 @@ impl Game {
         Ok(())
     }
 
+    fn wait_robot(&self) {
+        loop {
+            let is_robot_turn = self.state.read().is_robot_turn();
+            debug!(
+                "is robot turn {is_robot_turn}, turn {}",
+                self.state.read().turn
+            );
+            if !is_robot_turn {
+                break;
+            }
+            let card = self.state.write().robot_turn(&self.connection);
+            let msg = if let Some(card) = card {
+                self.state.write().next_turn(&card)
+            } else {
+                ServerMessage::Turn {
+                    to: None,
+                    turn: self.state.read().turn,
+                    mode: Mode::Normal,
+                }
+            };
+            self.connection.send(msg).ok();
+        }
+    }
+
     async fn handle_message(&self, id: u8, message: Message) -> Result<()> {
-        debug!("message {}", message.to_str().unwrap());
         let message: ClientMessage = match message.to_str() {
             Err(()) => return Ok(()),
             ::std::result::Result::Ok(text) => {
                 serde_json::from_str(text).context("failed to deserialized client message")?
             }
         };
-        debug!("message {message:?}");
+        debug!("[handle message] message {message:?}");
         match message {
             ClientMessage::Test(_) => {
                 self.state.write().test = true;
@@ -477,25 +500,7 @@ impl Game {
                             .ok();
                     }
                 }
-                debug!("initial messages have sent");
-                loop {
-                    let is_robot_turn = self.state.read().is_robot_turn();
-                    debug!("is robot turn {is_robot_turn}");
-                    if !self.state.read().is_robot_turn() {
-                        break;
-                    }
-                    let card = self.state.write().robot_turn(&self.connection);
-                    let msg = if let Some(card) = card {
-                        self.state.write().next_turn(&card)
-                    } else {
-                        ServerMessage::Turn {
-                            to: None,
-                            turn: self.state.read().turn,
-                            mode: Mode::Normal,
-                        }
-                    };
-                    self.connection.send(msg).ok();
-                }
+                self.wait_robot();
 
                 if Mode::Normal == self.state.read().mode {
                     let msg = self.state.write().draw_card();
@@ -536,24 +541,7 @@ impl Game {
                 if !confirm {
                     let msg = self.state.write().restore_turn();
                     self.connection.send(msg).ok();
-                    loop {
-                        let is_robot_turn = self.state.read().is_robot_turn();
-                        debug!("is robot turn {is_robot_turn}");
-                        if !is_robot_turn {
-                            break;
-                        }
-                        let card = self.state.write().robot_turn(&self.connection);
-                        let msg = if let Some(card) = card {
-                            self.state.write().next_turn(&card)
-                        } else {
-                            ServerMessage::Turn {
-                                to: None,
-                                turn: self.state.read().turn,
-                                mode: Mode::Normal,
-                            }
-                        };
-                        self.connection.send(msg).ok();
-                    }
+                    self.wait_robot();
                 } else {
                     let card = match mode {
                         Mode::Ding(c) => c,
@@ -562,8 +550,6 @@ impl Game {
                     let msg = ServerMessage::Ding { to: None, card };
                     self.connection.send(msg).ok();
                 }
-                let msg = self.state.write().draw_card();
-                self.connection.send(msg).ok();
             }
             ClientMessage::Pao { confirm } => {
                 let mode = self.state.read().mode.clone();
@@ -571,27 +557,7 @@ impl Game {
                 if !confirm {
                     let msg = self.state.write().restore_turn();
                     self.connection.send(msg).ok();
-                    loop {
-                        let is_robot_turn = self.state.read().is_robot_turn();
-                        debug!(
-                            "[pao]is robot turn {is_robot_turn}, turn {}",
-                            self.state.read().turn
-                        );
-                        if !is_robot_turn {
-                            break;
-                        }
-                        let card = self.state.write().robot_turn(&self.connection);
-                        let msg = if let Some(card) = card {
-                            self.state.write().next_turn(&card)
-                        } else {
-                            ServerMessage::Turn {
-                                to: None,
-                                turn: self.state.read().turn,
-                                mode: Mode::Normal,
-                            }
-                        };
-                        self.connection.send(msg).ok();
-                    }
+                    self.wait_robot();
                 } else {
                     let card = match mode {
                         Mode::Pao(c) => c,
