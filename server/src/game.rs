@@ -1,4 +1,7 @@
-use std::sync::atomic::{AtomicU8, Ordering};
+use std::{
+    collections::HashMap,
+    sync::atomic::{AtomicU8, Ordering},
+};
 
 use crate::{
     agent::Agent,
@@ -10,7 +13,10 @@ use log::{debug, warn};
 use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
 use tokio::sync::broadcast::{self, Sender};
-use warp::ws::{Message, WebSocket};
+use warp::{
+    ws::{Message, WebSocket},
+    Server,
+};
 
 pub struct Game {
     count: AtomicU8,
@@ -74,6 +80,9 @@ enum ServerMessage {
         to: Option<u8>,
         card: Card,
     },
+    Hu {
+        to: Option<u8>,
+    },
 }
 
 impl From<ServerMessage> for Message {
@@ -92,6 +101,7 @@ impl ServerMessage {
             ServerMessage::Discard { to, .. } => to.is_none(),
             ServerMessage::Pao { to, .. } => to.is_none(),
             ServerMessage::Ding { to, .. } => to.is_none(),
+            ServerMessage::Hu { to, .. } => to.is_none(),
         }
     }
 
@@ -103,6 +113,7 @@ impl ServerMessage {
             ServerMessage::Discard { to, .. } => *to,
             ServerMessage::Pao { to, .. } => *to,
             ServerMessage::Ding { to, .. } => *to,
+            ServerMessage::Hu { to, .. } => *to,
         }
     }
 }
@@ -172,6 +183,11 @@ impl GameState {
         }
         debug!("current turn {}", self.turn);
         Ok(())
+    }
+
+    pub fn end(&mut self) {
+        self.players.clear();
+        self.turn = 0;
     }
 
     pub fn restore_turn(&mut self) -> ServerMessage {
@@ -294,6 +310,11 @@ impl GameState {
                     }
                     let draw_card = self.remaining_cards.pop().unwrap();
                     self.players[self.turn as usize].hand.push(draw_card);
+                    if self.is_player_hu() {
+                        con.send(ServerMessage::Hu { to: None }).ok();
+                        self.end();
+                        return None;
+                    }
                     card = self.players[self.turn as usize].discard_card();
                 } else {
                     let msg = self.restore_turn();
@@ -343,6 +364,11 @@ impl GameState {
             }
             Mode::Normal => {
                 self.draw_card();
+                if self.is_player_hu() {
+                    con.send(ServerMessage::Hu { to: None }).ok();
+                    self.end();
+                    return None;
+                }
                 card = self.players[self.turn as usize].discard_card();
             }
         }
@@ -387,6 +413,53 @@ impl GameState {
 
     pub fn hand_of_player(&self, ind: usize) -> Vec<Card> {
         self.players[ind].hand.clone()
+    }
+
+    pub fn is_player_hu(&self) -> bool {
+        // TODO: we have to calculate the score to judge wether a player is hu
+        Self::is_hu(&self.players[self.turn as usize].hand)
+    }
+
+    fn is_hu(hand: &Vec<Card>) -> bool {
+        let mut hand_cnt = HashMap::new();
+        for c in hand {
+            hand_cnt.entry(c.0 / 4).and_modify(|e| *e += 1).or_insert(1);
+        }
+        debug!("hand_cnt: {hand_cnt:?}");
+        fn minus_entry(cnt: &mut HashMap<u8, i32>, key: u8, val: i32) {
+            cnt.entry(key).and_modify(|e| *e -= val);
+            if cnt[&key] == 0 {
+                cnt.remove(&key);
+            }
+        }
+        for i in 0..8 {
+            let i = 3 * i;
+            let j = i + 1;
+            let k = i + 2;
+            while hand_cnt.contains_key(&i)
+                && hand_cnt.contains_key(&j)
+                && hand_cnt.contains_key(&k)
+            {
+                minus_entry(&mut hand_cnt, i, 1);
+                minus_entry(&mut hand_cnt, j, 1);
+                minus_entry(&mut hand_cnt, k, 1);
+            }
+        }
+        debug!("hand_cnt: {hand_cnt:?}");
+        for i in 0..24 {
+            if hand_cnt.contains_key(&i) {
+                if hand_cnt[&i] >= 3 {
+                    minus_entry(&mut hand_cnt, i, 3);
+                }
+            }
+        }
+        debug!("hand_cnt: {hand_cnt:?}");
+
+        if hand_cnt.len() != 2 {
+            return false;
+        }
+        let keys: Vec<&u8> = hand_cnt.keys().collect();
+        keys[0] / 3 == keys[1] / 3
     }
 
     pub fn discard_card(&mut self, player_id: usize, card: Card) -> Result<()> {
@@ -506,6 +579,11 @@ impl Game {
                     let msg = self.state.write().draw_card();
                     debug!("write draw card message success");
                     self.connection.send(msg).ok();
+                    let is_hu = self.state.read().is_player_hu();
+                    if is_hu {
+                        self.connection.send(ServerMessage::Hu { to: None }).ok();
+                        self.state.write().end();
+                    }
                 }
             }
             ClientMessage::Discard { card } => {
@@ -533,6 +611,11 @@ impl Game {
                 if Mode::Normal == self.state.read().mode {
                     let msg = self.state.write().draw_card();
                     self.connection.send(msg).ok();
+                    let is_hu = self.state.read().is_player_hu();
+                    if is_hu {
+                        self.connection.send(ServerMessage::Hu { to: None }).ok();
+                        self.state.write().end();
+                    }
                 }
             }
             ClientMessage::Ding { confirm } => {
@@ -568,6 +651,11 @@ impl Game {
                 }
                 let msg = self.state.write().draw_card();
                 self.connection.send(msg).ok();
+                let is_hu = self.state.read().is_player_hu();
+                if is_hu {
+                    self.connection.send(ServerMessage::Hu { to: None }).ok();
+                    self.state.write().end();
+                }
             }
         }
         Ok(())
@@ -728,5 +816,30 @@ mod tests {
         client.send(ClientMessage::Pao { confirm: true }).await;
         client.expect_pao(Card(19)).await;
         client.expect_draw(Card(59)).await;
+    }
+
+    #[test]
+    fn test_hu() {
+        let mut builder = env_logger::Builder::from_default_env();
+        builder.target(env_logger::Target::Stdout);
+        builder.init();
+        // 0 1 2 / 0 1 2 / 3 3 3 / 3 4 5 / 6 7 8 / 6 7 8 / 8 6
+        let hand = [
+            0, 4, 8, 1, 5, 9, 12, 13, 14, 15, 16, 20, 24, 28, 32, 25, 29, 33, 34, 26,
+        ];
+        let hand = hand.into_iter().map(|n| Card(n)).collect();
+        assert_eq!(GameState::is_hu(&hand), true);
+        // 0 1 2 / 0 1 2 / 3 3 3 / 3 4 5 / 6 7 8 / 6 7 8 / 8 9
+        let hand = [
+            0, 4, 8, 1, 5, 9, 12, 13, 14, 15, 16, 20, 24, 28, 32, 25, 29, 33, 34, 36,
+        ];
+        let hand = hand.into_iter().map(|n| Card(n)).collect();
+        assert_eq!(GameState::is_hu(&hand), false);
+        // 1 2 / 0 1 2 / 3 3 3 / 3 4 5 / 6 7 8 / 6 7 8 / 7 8 9
+        let hand = [
+            4, 8, 1, 5, 9, 12, 13, 14, 15, 16, 20, 24, 28, 32, 25, 29, 33, 30, 34, 36,
+        ];
+        let hand = hand.into_iter().map(|n| Card(n)).collect();
+        assert_eq!(GameState::is_hu(&hand), false);
     }
 }
