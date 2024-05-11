@@ -131,6 +131,24 @@ class Game {
             const {to, card: id} = msg.Ding;
             if (to == my_turn) {return;}
             let card = new Card(id);
+        } else if (msg.Hu !== undefined) {
+            let result = document.querySelector("#result");
+            result.className = "";
+            if (current_turn == my_turn) {
+                let win = document.querySelector("#win");
+                win.className = "";
+                lose.className = "hide";
+            } else {
+                let lose = document.querySelector("#lose");
+                lose.className = "";
+                win.className = "hide";
+            }
+            window.setTimeout(() => {
+                win.className = "hide";
+                lose.className = "hide";
+                result.className = "hide";
+                render_room();
+            }, 3000);
         } else {
             console.log("unrecognized message");
         }
@@ -228,6 +246,7 @@ function render_room()
 {
     room.className = "";
     playground.className = "hide";
+    hide_btn();
     if (!room.firstChild.hasChildNodes()) {
         for (let i = 0; i < 3; i++) {
             room.firstElementChild.appendChild(create_player_slot(i == 0));
