@@ -80,6 +80,9 @@ enum ServerMessage {
     Hu {
         to: Option<u8>,
     },
+    End {
+        to: Option<u8>,
+    },
 }
 
 impl From<ServerMessage> for Message {
@@ -99,6 +102,7 @@ impl ServerMessage {
             ServerMessage::Pao { to, .. } => to.is_none(),
             ServerMessage::Ding { to, .. } => to.is_none(),
             ServerMessage::Hu { to, .. } => to.is_none(),
+            ServerMessage::End { to, .. } => to.is_none(),
         }
     }
 
@@ -111,6 +115,7 @@ impl ServerMessage {
             ServerMessage::Pao { to, .. } => *to,
             ServerMessage::Ding { to, .. } => *to,
             ServerMessage::Hu { to, .. } => *to,
+            ServerMessage::End { to, .. } => *to,
         }
     }
 }
@@ -245,11 +250,14 @@ impl GameState {
     }
 
     pub fn draw_card(&mut self) -> ServerMessage {
-        let card = self.remaining_cards.pop().unwrap();
-        self.players[self.turn as usize].hand.push(card);
-        ServerMessage::Draw {
-            to: Some(self.turn),
-            card,
+        if let Some(card) = self.remaining_cards.pop() {
+            self.players[self.turn as usize].hand.push(card);
+            ServerMessage::Draw {
+                to: Some(self.turn),
+                card,
+            }
+        } else {
+            ServerMessage::End { to: None }
         }
     }
 

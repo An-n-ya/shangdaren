@@ -125,12 +125,16 @@ class Game {
 
         } else if (msg.Pao !== undefined){
             const {to, card: id} = msg.Pao;
-            if (to == my_turn) {return;}
+            if (to == my_turn || current_turn == my_turn) {return;}
             let card = new Card(id);
+            let container = document.querySelector("#" + players[current_turn].name + "-pairing");
+            append_out(container, card, "抛");
         } else if (msg.Ding !== undefined){
             const {to, card: id} = msg.Ding;
-            if (to == my_turn) {return;}
+            if (to == my_turn || current_turn == my_turn) {return;}
             let card = new Card(id);
+            let container = document.querySelector("#" + players[current_turn].name + "-pairing");
+            append_out(container, card, "钉");
         } else if (msg.Hu !== undefined) {
             let result = document.querySelector("#result");
             result.className = "";
@@ -303,25 +307,6 @@ async function broadcast_discard(card) {
 }
 
 
-async function wait_player(player) {
-        let new_card = draw_card();
-        let res = await request.post("/turn/" + session_id, {
-            card: new_card.id,
-            turn: current_turn
-        });
-        let is_win = res.data.win;
-        if (is_win) {
-            end();
-            return
-        }
-        let discard_id = res.data.discard;
-        let card = discard_card(player.hand,discard_id);
-        let container = document.querySelector("#" + player.name + "-cards");
-        append_out(container, card, player.hand);
-        broadcast_discard(card);
-        current_turn = (current_turn + 1) % 3;
-}
-
 function discard_card(hand, id) {
     for (let i = 0 ; i < hand.length; i++) {
         if (hand[i].id == id) {
@@ -337,7 +322,6 @@ function discard_type(hand, id) {
     for (let i = 0 ; i < hand.length; i++) {
         if (Math.floor(hand[i].id / 4) == Math.floor(id / 4)) {
             index.push(i);
-            let card = hand[i];
         }
     }
     hand.splice(index[0], index.length);
@@ -355,8 +339,13 @@ function play_card_btn_enable(action) {
         play_btn.addEventListener('click', play_btn.play=function play() {
             game.sendPao(true);
             discard_type(players[current_turn].hand, cur_pao_or_ding);
+            let container = document.querySelector('#my-pairing');
+            append_out(container, new Card(cur_pao_or_ding), action);
+            container = document.querySelector('#left-cards');
+            remove_card_from(container, cur_pao_or_ding);
+            container = document.querySelector('#right-cards');
+            remove_card_from(container, cur_pao_or_ding);
             render();
-            // TODO: remove other same card
             hide_btn();
         }, false);
         cancel_btn.addEventListener('click', cancel_btn.cancel=function cancel() {
@@ -370,7 +359,12 @@ function play_card_btn_enable(action) {
             game.sendDing(true);
             discard_type(players[current_turn].hand, cur_pao_or_ding);
             render();
-            // TODO: remove other same card
+            let container = document.querySelector('#my-pairing');
+            append_out(container, new Card(cur_pao_or_ding), action);
+            container = document.querySelector('#left-cards');
+            remove_card_from(container, cur_pao_or_ding);
+            container = document.querySelector('#right-cards');
+            remove_card_from(container, cur_pao_or_ding);
             hide_btn();
         }, false);
         cancel_btn.addEventListener('click', cancel_btn.cancel=function cancel() {
@@ -395,8 +389,24 @@ function sort_hand() {
     }
 }
 
-function append_out(container, card) {
-    container.appendChild(create_card(card, false))
+function remove_card_from(container, card_id) {
+    let remove_childs = [];
+    container.childNodes.forEach((v) => {
+        v.classList.forEach((c) => {
+            let n = parseInt(c, 10);
+            // console.log("[remove_card_from] n:", n);
+            if (n != NaN && Math.floor(n / 4) == Math.floor(card_id / 4)) {
+                remove_childs.push(v);
+            }
+        })
+    });
+    remove_childs.forEach((child) => {
+        container.removeChild(child);
+    })
+}
+
+function append_out(container, card, flag="") {
+    container.appendChild(create_card(card, false, flag))
 }
 
 
@@ -450,9 +460,15 @@ function create_player_slot(is_me) {
     return div;
 }
 
-function create_card(card, clickable) {
+function create_card(card, clickable, flag) {
     let div = document.createElement("div");
     div.id = "card-wrapper";
+    if (flag == "抛") {
+        div.className = "pao-card";
+    } else if (flag == "钉") {
+        div.className = "ding-card";
+    }
+    div.classList.add(card.id);
     let img = document.createElement("img");
     img.src = "上大人/" + card.type + ".png";
     if (clickable) {
