@@ -13,10 +13,7 @@ use log::{debug, warn};
 use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
 use tokio::sync::broadcast::{self, Sender};
-use warp::{
-    ws::{Message, WebSocket},
-    Server,
-};
+use warp::ws::{Message, WebSocket};
 
 pub struct Game {
     count: AtomicU8,
@@ -417,10 +414,17 @@ impl GameState {
 
     pub fn is_player_hu(&self) -> bool {
         // TODO: we have to calculate the score to judge wether a player is hu
-        Self::is_hu(&self.players[self.turn as usize].hand)
+        let mut score = 0;
+        for p in &self.players[self.turn as usize].pairing {
+            match p {
+                Pairing::Triplet(_) => score += 4,
+                Pairing::Quadlet(_) => score += 8,
+            }
+        }
+        Self::is_hu(&self.players[self.turn as usize].hand, score, self.jing)
     }
 
-    fn is_hu(hand: &Vec<Card>) -> bool {
+    fn is_hu(hand: &Vec<Card>, mut score: u8, jing: Card) -> bool {
         let mut hand_cnt = HashMap::new();
         for c in hand {
             hand_cnt.entry(c.0 / 4).and_modify(|e| *e += 1).or_insert(1);
@@ -440,26 +444,46 @@ impl GameState {
                 && hand_cnt.contains_key(&j)
                 && hand_cnt.contains_key(&k)
             {
+                if i == 0 {
+                    score += 4;
+                }
+                for x in [i, j, k] {
+                    if jing.is_same_kind(&Card(x * 4)) {
+                        score += 4;
+                    }
+                }
                 minus_entry(&mut hand_cnt, i, 1);
                 minus_entry(&mut hand_cnt, j, 1);
                 minus_entry(&mut hand_cnt, k, 1);
             }
         }
-        debug!("hand_cnt: {hand_cnt:?}");
+        debug!("hand_cnt: {hand_cnt:?}, score: {score}");
+
         for i in 0..24 {
             if hand_cnt.contains_key(&i) {
                 if hand_cnt[&i] >= 3 {
                     minus_entry(&mut hand_cnt, i, 3);
+                    score += 4;
+                    if i == 0 {
+                        score += 8;
+                    }
+                    if jing.is_same_kind(&Card(i * 4)) {
+                        score += 8;
+                    }
                 }
             }
         }
-        debug!("hand_cnt: {hand_cnt:?}");
+        debug!("hand_cnt: {hand_cnt:?}, score: {score}");
 
         if hand_cnt.len() != 2 {
             return false;
         }
         let keys: Vec<&u8> = hand_cnt.keys().collect();
-        keys[0] / 3 == keys[1] / 3
+        if score >= 12 {
+            keys[0] / 3 == keys[1] / 3
+        } else {
+            false
+        }
     }
 
     pub fn discard_card(&mut self, player_id: usize, card: Card) -> Result<()> {
@@ -828,18 +852,18 @@ mod tests {
             0, 4, 8, 1, 5, 9, 12, 13, 14, 15, 16, 20, 24, 28, 32, 25, 29, 33, 34, 26,
         ];
         let hand = hand.into_iter().map(|n| Card(n)).collect();
-        assert_eq!(GameState::is_hu(&hand), true);
+        assert_eq!(GameState::is_hu(&hand, 0, Card(90)), true);
         // 0 1 2 / 0 1 2 / 3 3 3 / 3 4 5 / 6 7 8 / 6 7 8 / 8 9
         let hand = [
             0, 4, 8, 1, 5, 9, 12, 13, 14, 15, 16, 20, 24, 28, 32, 25, 29, 33, 34, 36,
         ];
         let hand = hand.into_iter().map(|n| Card(n)).collect();
-        assert_eq!(GameState::is_hu(&hand), false);
+        assert_eq!(GameState::is_hu(&hand, 0, Card(90)), false);
         // 1 2 / 0 1 2 / 3 3 3 / 3 4 5 / 6 7 8 / 6 7 8 / 7 8 9
         let hand = [
             4, 8, 1, 5, 9, 12, 13, 14, 15, 16, 20, 24, 28, 32, 25, 29, 33, 30, 34, 36,
         ];
         let hand = hand.into_iter().map(|n| Card(n)).collect();
-        assert_eq!(GameState::is_hu(&hand), false);
+        assert_eq!(GameState::is_hu(&hand, 0, Card(90)), false);
     }
 }
