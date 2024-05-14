@@ -1,10 +1,11 @@
-use core::num;
 use std::collections::HashMap;
 
-use log::debug;
 use serde::{Deserialize, Serialize};
 
-use crate::card::{Card, Pairing};
+use crate::{
+    card::{Card, Pairing},
+    game::GameState,
+};
 #[derive(Default, Deserialize, Serialize)]
 pub struct Agent {
     pub hand: Vec<Card>,
@@ -21,6 +22,8 @@ pub struct Agent {
     pub test: bool,
     prob: HashMap<u8, u8>,
     remaining: u8,
+    pub jing: Card,
+    ting: Option<Vec<u8>>,
 }
 
 fn divide_into_group(hand: &Vec<Card>) -> Vec<Vec<Card>> {
@@ -43,14 +46,16 @@ fn divide_into_group(hand: &Vec<Card>) -> Vec<Vec<Card>> {
     group
 }
 
-fn is_ting(hand: &Vec<Card>) -> Option<Vec<u8>> {
-    unimplemented!()
-}
-
 impl Agent {
     pub fn discard_card(&mut self) -> Card {
         let index = if !self.test {
-            rand::random::<usize>() % self.hand.len()
+            // rand::random::<usize>() % self.hand.len()
+            if self.ting.is_some() {
+                // is we are in ting state
+                19
+            } else {
+                self.choose_discard_card()
+            }
         } else {
             0
         };
@@ -60,15 +65,55 @@ impl Agent {
         self.hand.remove(index);
 
         self.update_probability();
+        self.ting = self.is_ting(&self.hand);
 
         card
+    }
+
+    fn choose_discard_card(&self) -> usize {
+        let groups = divide_into_group(&self.hand);
+        let scores: Vec<f32> = groups
+            .iter()
+            .map(|group| self.form_ke(group) + self.form_shun(group))
+            .collect();
+        let (_, ind) = scores
+            .iter()
+            .enumerate()
+            .map(|(ind, value)| ((*value * 1000.0) as usize, ind))
+            .min()
+            .unwrap();
+
+        let card = self.select_worst_one_from_group(&groups[ind]);
+        self.hand.iter().position(|&c| c == card).unwrap()
+    }
+
+    fn select_worst_one_from_group(&self, group: &Vec<Card>) -> Card {
+        let mut group = group.clone();
+        let mut scores = vec![];
+        for i in 0..group.len() {
+            group.swap(0, i);
+
+            let score = self.form_ke(&group[1..]) + self.form_shun(&group[1..]);
+            scores.push(score);
+
+            group.swap(0, i);
+        }
+        let (_, ind) = scores
+            .iter()
+            .enumerate()
+            .map(|(ind, value)| ((*value * 1000.0) as usize, ind))
+            .min()
+            .unwrap();
+
+        group[ind]
     }
 
     pub fn pao_card(&mut self, card: Card) -> bool {
         if self.test {
             return false;
         }
-        let res = rand::random::<u8>() % 2 == 1;
+        // let res = rand::random::<u8>() % 2 == 1;
+        let res = true;
         if res {
             self.pairing.push(Pairing::Quadlet(card));
             let mut index = vec![];
@@ -97,11 +142,12 @@ impl Agent {
         res
     }
     pub fn ding_card(&mut self, card: Card) -> bool {
-        let res = if self.test {
-            true
-        } else {
-            rand::random::<u8>() % 2 == 1
-        };
+        let res = true;
+        // let res = if self.test {
+        //     true
+        // } else {
+        //     rand::random::<u8>() % 2 == 1
+        // };
         if res {
             self.pairing.push(Pairing::Triplet(card));
             let mut index = vec![];
@@ -131,6 +177,33 @@ impl Agent {
         res
     }
 
+    fn is_ting(&self, hand: &Vec<Card>) -> Option<Vec<u8>> {
+        let mut ting_card = vec![];
+        let mut hand = hand.clone();
+        let mut score = 0;
+        for p in &self.pairing {
+            match p {
+                Pairing::Triplet(_) => score += 2,
+                Pairing::Quadlet(_) => score += 6,
+            }
+        }
+        for i in 0..24 {
+            if self.prob[&i] == 0 {
+                continue;
+            }
+            let c = Card(i * 4);
+            hand.push(c);
+            if GameState::is_hu(&hand, score, self.jing) {
+                ting_card.push(i);
+            }
+            hand.pop();
+        }
+        if ting_card.len() == 0 {
+            return None;
+        }
+        Some(ting_card)
+    }
+
     pub fn update_probability(&mut self) {
         let mut mmap: HashMap<u8, u8> = HashMap::default();
         for i in 0..24 {
@@ -145,20 +218,20 @@ impl Agent {
         {
             *mmap.entry(c.0 / 4).or_insert(4) -= 1;
         }
-        debug!("[update_probability] mmap: {mmap:?}");
-        debug!("[update_probability] hand: {:?}", self.hand);
-        debug!("[update_probability] out: {:?}", self.out);
-        debug!("[update_probability] left_out: {:?}", self.player_left_out);
-        debug!("[update_probability] rigt_out: {:?}", self.player_right_out);
-        debug!("[update_probability] pairing: {:?}", self.pairing);
-        debug!(
-            "[update_probability] left_pairing: {:?}",
-            self.player_left_pairing
-        );
-        debug!(
-            "[update_probability] rigt_pairing: {:?}",
-            self.player_right_pairing
-        );
+        // debug!("[update_probability] mmap: {mmap:?}");
+        // debug!("[update_probability] hand: {:?}", self.hand);
+        // debug!("[update_probability] out: {:?}", self.out);
+        // debug!("[update_probability] left_out: {:?}", self.player_left_out);
+        // debug!("[update_probability] rigt_out: {:?}", self.player_right_out);
+        // debug!("[update_probability] pairing: {:?}", self.pairing);
+        // debug!(
+        //     "[update_probability] left_pairing: {:?}",
+        //     self.player_left_pairing
+        // );
+        // debug!(
+        //     "[update_probability] rigt_pairing: {:?}",
+        //     self.player_right_pairing
+        // );
         for p in self
             .pairing
             .iter()
@@ -237,7 +310,7 @@ impl Agent {
         acc
     }
 
-    fn form_shun(&self, group: &Vec<Card>) -> f32 {
+    fn form_shun(&self, group: &[Card]) -> f32 {
         let mut mmap: HashMap<u8, u8> = HashMap::new();
         for c in group {
             *mmap.entry(c.0 / 4).or_insert(0) += 1;
@@ -268,7 +341,7 @@ impl Agent {
         }
     }
 
-    fn form_ke(&self, group: &Vec<Card>) -> f32 {
+    fn form_ke(&self, group: &[Card]) -> f32 {
         let mut mmap: HashMap<u8, u8> = HashMap::new();
         for c in group {
             *mmap.entry(c.0 / 4).or_insert(0) += 1;

@@ -21,7 +21,7 @@ pub struct Game {
     connection: broadcast::Sender<ServerMessage>,
 }
 
-struct GameState {
+pub struct GameState {
     pub players: Vec<Agent>,
     remaining_cards: Vec<Card>,
     #[allow(unused)]
@@ -50,7 +50,7 @@ enum ClientMessage {
     Pao { confirm: bool },
 }
 #[derive(Clone, Serialize, Deserialize, Debug)]
-enum ServerMessage {
+pub enum ServerMessage {
     Turn {
         to: Option<u8>,
         turn: u8,
@@ -183,6 +183,7 @@ impl GameState {
                     .hand
                     .push(self.remaining_cards.pop().unwrap());
             }
+            self.players[i].jing = self.jing;
         }
         debug!("current turn {}", self.turn);
         Ok(())
@@ -434,7 +435,6 @@ impl GameState {
     }
 
     pub fn is_player_hu(&self) -> bool {
-        // TODO: we have to calculate the score to judge wether a player is hu
         let mut score = 0;
         for p in &self.players[self.turn as usize].pairing {
             match p {
@@ -445,7 +445,7 @@ impl GameState {
         Self::is_hu(&self.players[self.turn as usize].hand, score, self.jing)
     }
 
-    fn is_hu(hand: &Vec<Card>, mut score: u8, jing: Card) -> bool {
+    pub fn is_hu(hand: &Vec<Card>, mut score: u8, jing: Card) -> bool {
         let mut hand_cnt = HashMap::new();
         for c in hand {
             hand_cnt.entry(c.0 / 4).and_modify(|e| *e += 1).or_insert(1);
