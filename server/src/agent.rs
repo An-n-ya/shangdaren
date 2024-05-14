@@ -1,6 +1,7 @@
 use core::num;
 use std::collections::HashMap;
 
+use log::debug;
 use serde::{Deserialize, Serialize};
 
 use crate::card::{Card, Pairing};
@@ -42,6 +43,10 @@ fn divide_into_group(hand: &Vec<Card>) -> Vec<Vec<Card>> {
     group
 }
 
+fn is_ting(hand: &Vec<Card>) -> Option<Vec<u8>> {
+    unimplemented!()
+}
+
 impl Agent {
     pub fn discard_card(&mut self) -> Card {
         let index = if !self.test {
@@ -76,6 +81,16 @@ impl Agent {
             for i in 0..3 {
                 self.hand.remove(index[i] - i);
             }
+            if let Some(c) = self.player_left_out.last() {
+                if c.is_same_kind(&card) {
+                    self.player_left_out.pop();
+                }
+            }
+            if let Some(c) = self.player_right_out.last() {
+                if c.is_same_kind(&card) {
+                    self.player_right_out.pop();
+                }
+            }
         }
 
         self.update_probability();
@@ -99,6 +114,17 @@ impl Agent {
             for i in 0..2 {
                 self.hand.remove(index[i] - i);
             }
+
+            if let Some(c) = self.player_left_out.last() {
+                if c.is_same_kind(&card) {
+                    self.player_left_out.pop();
+                }
+            }
+            if let Some(c) = self.player_right_out.last() {
+                if c.is_same_kind(&card) {
+                    self.player_right_out.pop();
+                }
+            }
         }
 
         self.update_probability();
@@ -119,6 +145,20 @@ impl Agent {
         {
             *mmap.entry(c.0 / 4).or_insert(4) -= 1;
         }
+        debug!("[update_probability] mmap: {mmap:?}");
+        debug!("[update_probability] hand: {:?}", self.hand);
+        debug!("[update_probability] out: {:?}", self.out);
+        debug!("[update_probability] left_out: {:?}", self.player_left_out);
+        debug!("[update_probability] rigt_out: {:?}", self.player_right_out);
+        debug!("[update_probability] pairing: {:?}", self.pairing);
+        debug!(
+            "[update_probability] left_pairing: {:?}",
+            self.player_left_pairing
+        );
+        debug!(
+            "[update_probability] rigt_pairing: {:?}",
+            self.player_right_pairing
+        );
         for p in self
             .pairing
             .iter()

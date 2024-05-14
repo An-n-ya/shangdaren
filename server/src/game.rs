@@ -60,6 +60,7 @@ enum ServerMessage {
         to: Option<u8>,
         cur_turn: u8,
         hand: Vec<Card>,
+        jing: Card,
     },
     Draw {
         to: Option<u8>,
@@ -249,6 +250,16 @@ impl GameState {
         }
     }
 
+    pub fn handle_ding_or_pao_out(&mut self, card: &Card) {
+        for i in 0..3 {
+            if let Some(c) = self.players[i].out.last() {
+                if c.is_same_kind(card) {
+                    self.players[i].out.pop();
+                }
+            }
+        }
+    }
+
     pub fn draw_card(&mut self) -> ServerMessage {
         if let Some(card) = self.remaining_cards.pop() {
             self.players[self.turn as usize].hand.push(card);
@@ -313,6 +324,7 @@ impl GameState {
                             .ok();
                         }
                     }
+                    self.handle_ding_or_pao_out(&discard);
                     let draw_card = self.remaining_cards.pop().unwrap();
                     self.players[self.turn as usize].hand.push(draw_card);
                     if self.is_player_hu() {
@@ -360,6 +372,7 @@ impl GameState {
                             .ok();
                         }
                     }
+                    self.handle_ding_or_pao_out(&discard);
                     card = self.players[self.turn as usize].discard_card();
                 } else {
                     let msg = self.restore_turn();
@@ -601,6 +614,7 @@ impl Game {
                                 to: Some(i),
                                 cur_turn: state.turn,
                                 hand: state.hand_of_player(i as usize),
+                                jing: state.jing,
                             })
                             .ok();
                     }
@@ -662,6 +676,7 @@ impl Game {
                         Mode::Ding(c) => c,
                         _ => bail!("wrong mode, expect Ding mode, got {:?}", mode),
                     };
+                    self.state.write().handle_ding_or_pao_out(&card);
                     let msg = ServerMessage::Ding { to: None, card };
                     self.connection.send(msg).ok();
                 }
@@ -678,6 +693,7 @@ impl Game {
                         Mode::Pao(c) => c,
                         _ => bail!("wrong mode, expect Wa mode, got {:?}", mode),
                     };
+                    self.state.write().handle_ding_or_pao_out(&card);
                     let msg = ServerMessage::Pao { to: None, card };
                     self.connection.send(msg).ok();
                 }
@@ -768,10 +784,16 @@ mod tests {
         pub async fn expect_initial(&mut self, expect_turn: u8, expect_hand: &Vec<Card>) {
             let msg = self.recv().await;
             match msg {
-                ServerMessage::Initial { to, cur_turn, hand } => {
+                ServerMessage::Initial {
+                    to,
+                    cur_turn,
+                    hand,
+                    jing,
+                } => {
                     assert_eq!(to.unwrap(), 0);
                     assert_eq!(cur_turn, expect_turn);
                     assert_eq!(&hand, expect_hand);
+                    assert_eq!(jing.0, 95);
                 }
                 _ => panic!("expect initial message, got {msg:?}"),
             }
@@ -852,9 +874,9 @@ mod tests {
 
     #[test]
     fn test_hu() {
-        let mut builder = env_logger::Builder::from_default_env();
-        builder.target(env_logger::Target::Stdout);
-        builder.init();
+        // let mut builder = env_logger::Builder::from_default_env();
+        // builder.target(env_logger::Target::Stdout);
+        // builder.init();
         // 0 1 2 / 0 1 2 / 3 3 3 / 3 4 5 / 6 7 8 / 6 7 8 / 8 6
         let hand = [
             0, 4, 8, 1, 5, 9, 12, 13, 14, 15, 16, 20, 24, 28, 32, 25, 29, 33, 34, 26,
