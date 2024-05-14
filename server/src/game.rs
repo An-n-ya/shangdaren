@@ -425,8 +425,8 @@ impl GameState {
         let mut score = 0;
         for p in &self.players[self.turn as usize].pairing {
             match p {
-                Pairing::Triplet(_) => score += 4,
-                Pairing::Quadlet(_) => score += 8,
+                Pairing::Triplet(_) => score += 2,
+                Pairing::Quadlet(_) => score += 6,
             }
         }
         Self::is_hu(&self.players[self.turn as usize].hand, score, self.jing)
