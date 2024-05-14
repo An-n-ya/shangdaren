@@ -166,13 +166,38 @@ impl Agent {
         acc
     }
 
-    fn form_shun(&self, group: &Vec<Card>) -> f32 {
-        fn minus_entry(cnt: &mut HashMap<u8, u8>, key: u8, val: u8) {
-            cnt.entry(key).and_modify(|e| *e -= val);
-            if cnt[&key] == 0 {
-                cnt.remove(&key);
-            }
+    fn get_same_card_prob_of(&self, card_type: u8) -> f32 {
+        let number = self.prob.get(&card_type).unwrap();
+        if *number == 0 {
+            return 0.0;
         }
+        let mut acc = 0.0;
+        for i in 0..(1 << 6) {
+            if i & 1 != 1 || i & (1 << 3) != 1 {
+                continue;
+            }
+            let mut p = 0.0;
+            let mut n = *number as f32;
+            let mut remaining = self.remaining as f32;
+            for k in (0..6).rev() {
+                if n == 0.0 {
+                    p = 0.0;
+                    break;
+                }
+                if 1 << k & i != 0 {
+                    p *= n / remaining;
+                    n -= 1.0;
+                } else {
+                    p *= 1.0 - n / remaining;
+                }
+                remaining -= 1.0;
+            }
+            acc += p;
+        }
+        acc
+    }
+
+    fn form_shun(&self, group: &Vec<Card>) -> f32 {
         let mut mmap: HashMap<u8, u8> = HashMap::new();
         for c in group {
             *mmap.entry(c.0 / 4).or_insert(0) += 1;
@@ -204,6 +229,50 @@ impl Agent {
     }
 
     fn form_ke(&self, group: &Vec<Card>) -> f32 {
-        unimplemented!()
+        let mut mmap: HashMap<u8, u8> = HashMap::new();
+        for c in group {
+            *mmap.entry(c.0 / 4).or_insert(0) += 1;
+        }
+        let cat = group[0].0 / 12;
+        let (i, j, k) = (cat * 3, cat * 3 + 1, cat * 3 + 2);
+        for c in [i, j, k] {
+            if mmap.contains_key(&c) && *mmap.get(&c).unwrap() >= 3 {
+                // TODO: how should we handle 4 same card case
+                minus_entry(&mut mmap, c, 3);
+            }
+        }
+
+        if mmap.len() == 0 {
+            return f32::MAX;
+        }
+        for (key, value) in mmap {
+            assert!(value < 3);
+            assert!(value > 0);
+            let cnt = 3 - value;
+            let number = *self.prob.get(&key).unwrap();
+            if cnt == 1 {
+                // draw prob
+                let p1 = self.get_prob_of(key, 3);
+                // peng prob
+                let p2 = number as f32 / (self.remaining + 19 * 2) as f32 * 2.0;
+                return p1 + p2;
+            } else if cnt == 2 {
+                // draw prob
+                let p1 = self.get_same_card_prob_of(key);
+                // 1 draw 1 peng prob
+                let p_prob = number as f32 / (self.remaining - 3 + 19 * 2) as f32 * 2.0;
+                let p2 = self.get_prob_of(key, 3) * p_prob;
+                return p1 + p2;
+            } else {
+                unreachable!()
+            }
+        }
+        unreachable!()
+    }
+}
+fn minus_entry(cnt: &mut HashMap<u8, u8>, key: u8, val: u8) {
+    cnt.entry(key).and_modify(|e| *e -= val);
+    if cnt[&key] == 0 {
+        cnt.remove(&key);
     }
 }
