@@ -46,7 +46,7 @@ class Game {
             const ws = new WebSocket(uri)
             ws.onopen = () => {
                 this.ws = ws;
-                this.sendTest();
+                // this.sendTest();
                 this.sendReady();
             }
             ws.onmessage = ({data}) => {

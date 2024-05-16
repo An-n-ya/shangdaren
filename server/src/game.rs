@@ -4,7 +4,7 @@ use std::{
 };
 
 use crate::{
-    agent::Agent,
+    agent::{Agent, Strategy},
     card::{Card, Pairing},
 };
 use anyhow::{bail, Context, Ok, Result};
@@ -31,6 +31,8 @@ pub struct GameState {
     jing: Card,
     mode: Mode,
     test: bool,
+    pub training: bool,
+    pub winner: Option<u8>,
 }
 #[derive(Deserialize, Serialize, Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Mode {
@@ -145,6 +147,8 @@ impl Default for GameState {
             jing: Card(0),
             mode: Mode::Normal,
             test: false,
+            training: false,
+            winner: None,
         }
     }
 }
@@ -158,8 +162,9 @@ impl GameState {
         let mut agent = Agent::default();
         agent.is_robot = true;
         agent.ready = true;
+        agent.update_probability();
         if self.test {
-            agent.test = true;
+            agent.strategy = Strategy::Test;
         }
         self.players.push(agent)
     }
@@ -168,10 +173,12 @@ impl GameState {
         if self.players.len() != 3 {
             bail!("wrong players number {}", self.players.len());
         }
+        self.winner = None;
         if !self.test {
             self.shuffle_cards();
             self.jing = Card(rand::random::<u8>() % Self::TOTAL as u8);
             self.turn = rand::random::<u8>() % 3;
+            self.prev_turn = Some(self.turn);
         } else {
             self.remaining_cards.reverse();
             self.jing = Card(95);
@@ -184,14 +191,29 @@ impl GameState {
                     .push(self.remaining_cards.pop().unwrap());
             }
             self.players[i].jing = self.jing;
+            self.players[i].update_probability();
         }
         debug!("current turn {}", self.turn);
         Ok(())
     }
 
-    pub fn end(&mut self) {
-        self.players.clear();
+    pub fn end(&mut self, even_flag: bool) {
+        if !even_flag {
+            self.winner = Some(self.turn);
+        } else {
+            self.winner = Some(u8::MAX);
+        }
+        self.remaining_cards = (0..Self::TOTAL)
+            .into_iter()
+            .map(|n| Card(n as u8))
+            .collect();
         self.turn = 0;
+        self.round = 0;
+        for i in 0..3 {
+            self.players[i].clear();
+        }
+        self.prev_turn = None;
+        self.mode = Mode::Normal;
     }
 
     pub fn restore_turn(&mut self) -> ServerMessage {
@@ -209,6 +231,7 @@ impl GameState {
         self.prev_turn = Some((self.turn + 1) % Self::PLAYER_NUM);
         if Self::can_form_quadlet(&self.players[next_player].hand, discard) {
             self.turn = next_player as u8;
+            debug!("player {next_player} pao card {discard:?}");
             self.mode = Mode::Pao(*discard);
             ServerMessage::Turn {
                 to: None,
@@ -217,6 +240,7 @@ impl GameState {
             }
         } else if Self::can_form_quadlet(&self.players[prev_player].hand, discard) {
             self.turn = prev_player as u8;
+            debug!("player {prev_player} pao card {discard:?}");
             self.mode = Mode::Pao(*discard);
             ServerMessage::Turn {
                 to: None,
@@ -225,6 +249,7 @@ impl GameState {
             }
         } else if Self::can_form_triplet(&self.players[next_player].hand, discard) {
             self.turn = next_player as u8;
+            debug!("player {next_player} ding card {discard:?}");
             self.mode = Mode::Ding(*discard);
             ServerMessage::Turn {
                 to: None,
@@ -233,6 +258,7 @@ impl GameState {
             }
         } else if Self::can_form_triplet(&self.players[prev_player].hand, discard) {
             self.turn = prev_player as u8;
+            debug!("player {prev_player} ding card {discard:?}");
             self.mode = Mode::Ding(*discard);
             ServerMessage::Turn {
                 to: None,
@@ -258,6 +284,16 @@ impl GameState {
                     self.players[i].out.pop();
                 }
             }
+            if let Some(c) = self.players[i].player_right_out.last() {
+                if c.is_same_kind(card) {
+                    self.players[i].player_right_out.pop();
+                }
+            }
+            if let Some(c) = self.players[i].player_left_out.last() {
+                if c.is_same_kind(card) {
+                    self.players[i].player_left_out.pop();
+                }
+            }
         }
     }
 
@@ -269,6 +305,7 @@ impl GameState {
                 card,
             }
         } else {
+            self.end(true);
             ServerMessage::End { to: None }
         }
     }
@@ -277,7 +314,7 @@ impl GameState {
         self.players[self.turn as usize].is_robot
     }
 
-    pub fn robot_turn(&mut self, con: &Sender<ServerMessage>) -> Option<Card> {
+    pub fn robot_turn(&mut self, con: Option<&Sender<ServerMessage>>) -> Option<Card> {
         assert!(self.is_robot_turn());
         #[allow(unused)]
         let mut card = Card(0);
@@ -289,7 +326,10 @@ impl GameState {
             Left,
         }
 
-        debug!("[robot_turn] mode: {:?}", self.mode);
+        debug!(
+            "[robot_turn] mode: {:?}, cur turn: {}",
+            self.mode, self.turn
+        );
 
         match self.mode {
             Mode::Pao(discard) => {
@@ -318,25 +358,35 @@ impl GameState {
                             }
                         };
                         if !is_robot {
-                            con.send(ServerMessage::Pao {
-                                to: None,
-                                card: discard,
-                            })
-                            .ok();
+                            if let Some(con) = con {
+                                con.send(ServerMessage::Pao {
+                                    to: None,
+                                    card: discard,
+                                })
+                                .ok();
+                            }
                         }
                     }
                     self.handle_ding_or_pao_out(&discard);
-                    let draw_card = self.remaining_cards.pop().unwrap();
-                    self.players[self.turn as usize].hand.push(draw_card);
+                    let msg = self.draw_card();
+                    match msg {
+                        ServerMessage::End { .. } => return None,
+                        _ => {}
+                    }
                     if self.is_player_hu() {
-                        con.send(ServerMessage::Hu { to: None }).ok();
-                        self.end();
+                        if let Some(con) = con {
+                            con.send(ServerMessage::Hu { to: None }).ok();
+                        }
+                        self.end(false);
                         return None;
                     }
                     card = self.players[self.turn as usize].discard_card();
                 } else {
+                    self.mode = Mode::Normal;
                     let msg = self.restore_turn();
-                    con.send(msg).ok();
+                    if let Some(con) = con {
+                        con.send(msg).ok();
+                    }
                     return None;
                 }
             }
@@ -366,26 +416,37 @@ impl GameState {
                             }
                         };
                         if !is_robot {
-                            con.send(ServerMessage::Ding {
-                                to: None,
-                                card: discard,
-                            })
-                            .ok();
+                            if let Some(con) = con {
+                                con.send(ServerMessage::Ding {
+                                    to: None,
+                                    card: discard,
+                                })
+                                .ok();
+                            }
                         }
                     }
                     self.handle_ding_or_pao_out(&discard);
                     card = self.players[self.turn as usize].discard_card();
                 } else {
+                    self.mode = Mode::Normal;
                     let msg = self.restore_turn();
-                    con.send(msg).ok();
+                    if let Some(con) = con {
+                        con.send(msg).ok();
+                    }
                     return None;
                 }
             }
             Mode::Normal => {
-                self.draw_card();
+                let msg = self.draw_card();
+                match msg {
+                    ServerMessage::End { .. } => return None,
+                    _ => {}
+                }
                 if self.is_player_hu() {
-                    con.send(ServerMessage::Hu { to: None }).ok();
-                    self.end();
+                    if let Some(con) = con {
+                        con.send(ServerMessage::Hu { to: None }).ok();
+                    }
+                    self.end(false);
                     return None;
                 }
                 card = self.players[self.turn as usize].discard_card();
@@ -399,7 +460,9 @@ impl GameState {
                     Pos::Left => player.player_right_out.push(card),
                 }
             } else {
-                con.send(ServerMessage::Discard { to: Some(n), card }).ok();
+                if let Some(con) = con {
+                    con.send(ServerMessage::Discard { to: Some(n), card }).ok();
+                }
             }
         }
         Some(card)
@@ -450,7 +513,7 @@ impl GameState {
         for c in hand {
             hand_cnt.entry(c.0 / 4).and_modify(|e| *e += 1).or_insert(1);
         }
-        debug!("hand_cnt: {hand_cnt:?}");
+        // debug!("hand_cnt: {hand_cnt:?}");
         fn minus_entry(cnt: &mut HashMap<u8, i32>, key: u8, val: i32) {
             cnt.entry(key).and_modify(|e| *e -= val);
             if cnt[&key] == 0 {
@@ -478,7 +541,7 @@ impl GameState {
                 minus_entry(&mut hand_cnt, k, 1);
             }
         }
-        debug!("hand_cnt: {hand_cnt:?}, score: {score}");
+        // debug!("hand_cnt: {hand_cnt:?}, score: {score}");
 
         for i in 0..24 {
             if hand_cnt.contains_key(&i) {
@@ -494,7 +557,7 @@ impl GameState {
                 }
             }
         }
-        debug!("hand_cnt: {hand_cnt:?}, score: {score}");
+        // debug!("hand_cnt: {hand_cnt:?}, score: {score}");
 
         if hand_cnt.len() != 2 {
             return false;
@@ -572,7 +635,7 @@ impl Game {
             if !is_robot_turn {
                 break;
             }
-            let card = self.state.write().robot_turn(&self.connection);
+            let card = self.state.write().robot_turn(Some(&self.connection));
             let msg = if let Some(card) = card {
                 self.state.write().next_turn(&card)
             } else {
@@ -628,7 +691,7 @@ impl Game {
                     let is_hu = self.state.read().is_player_hu();
                     if is_hu {
                         self.connection.send(ServerMessage::Hu { to: None }).ok();
-                        self.state.write().end();
+                        self.state.write().end(false);
                     }
                 }
             }
@@ -651,7 +714,7 @@ impl Game {
                     if !self.state.read().is_robot_turn() {
                         break;
                     }
-                    card = self.state.write().robot_turn(&self.connection);
+                    card = self.state.write().robot_turn(Some(&self.connection));
                 }
 
                 if Mode::Normal == self.state.read().mode {
@@ -660,7 +723,7 @@ impl Game {
                     let is_hu = self.state.read().is_player_hu();
                     if is_hu {
                         self.connection.send(ServerMessage::Hu { to: None }).ok();
-                        self.state.write().end();
+                        self.state.write().end(false);
                     }
                 }
             }
@@ -702,7 +765,7 @@ impl Game {
                 let is_hu = self.state.read().is_player_hu();
                 if is_hu {
                     self.connection.send(ServerMessage::Hu { to: None }).ok();
-                    self.state.write().end();
+                    self.state.write().end(false);
                 }
             }
         }

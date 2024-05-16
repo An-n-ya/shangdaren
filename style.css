@@ -13,17 +13,19 @@
 }
 #card-wrapper.pao-card::before {
     content: "抛";
-    position: absolute;
-    z-index: 1;
-    font-size: 0.6em;
-    font-weight: bold;
 }
 #card-wrapper.ding-card::before {
     content: "钉";
+}
+#card-wrapper.pao-card::before,
+#card-wrapper.ding-card::before {
     position: absolute;
     z-index: 1;
     font-size: 0.6em;
     font-weight: bold;
+    background-color: black;
+    color: white;
+    border-radius: 2px;
 }
 /* #card-wrapper:last-child {
     overflow: visible;
@@ -78,6 +80,7 @@
 #my-pairing {
     height: 50px;
     width: 200px;
+    display: grid;
     grid-template-columns: repeat(6, 1fr);
     grid-template-rows: repeat(6, 1fr);
     gap:3px;

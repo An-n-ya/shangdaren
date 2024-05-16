@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-#[derive(Deserialize, Serialize, Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[derive(Deserialize, Serialize, Clone, Copy, PartialEq, Eq, Debug, Default, PartialOrd, Ord)]
 pub struct Card(pub u8);
 
 #[derive(Deserialize, Serialize, Debug)]

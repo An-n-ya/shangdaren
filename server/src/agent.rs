@@ -1,12 +1,25 @@
 use std::collections::HashMap;
 
-use serde::{Deserialize, Serialize};
+use log::{debug, info};
 
 use crate::{
     card::{Card, Pairing},
     game::GameState,
 };
-#[derive(Default, Deserialize, Serialize)]
+
+pub enum Strategy {
+    Random,
+    Level1,
+    Test,
+}
+
+impl Default for Strategy {
+    fn default() -> Self {
+        Self::Level1
+    }
+}
+
+#[derive(Default)]
 pub struct Agent {
     pub hand: Vec<Card>,
     pub out: Vec<Card>,
@@ -19,7 +32,7 @@ pub struct Agent {
     pub turn: u8,
     pub is_robot: bool,
     pub ready: bool,
-    pub test: bool,
+    pub strategy: Strategy,
     prob: HashMap<u8, u8>,
     remaining: u8,
     pub jing: Card,
@@ -27,6 +40,7 @@ pub struct Agent {
 }
 
 fn divide_into_group(hand: &Vec<Card>) -> Vec<Vec<Card>> {
+    assert!(hand.len() > 0);
     let mut group = vec![];
     let mut tmp = vec![];
     for i in 0..96 {
@@ -47,19 +61,36 @@ fn divide_into_group(hand: &Vec<Card>) -> Vec<Vec<Card>> {
 }
 
 impl Agent {
+    pub fn clear(&mut self) {
+        self.hand.clear();
+        self.out.clear();
+        self.pairing.clear();
+        self.player_left_out.clear();
+        self.player_right_out.clear();
+        self.player_left_pairing.clear();
+        self.player_right_pairing.clear();
+        self.ting = None;
+        self.round = 0;
+        self.prob.clear();
+        self.remaining = 0;
+    }
     pub fn discard_card(&mut self) -> Card {
-        let index = if !self.test {
-            // rand::random::<usize>() % self.hand.len()
-            if self.ting.is_some() {
-                // is we are in ting state
-                19
-            } else {
-                self.choose_discard_card()
+        let index = match self.strategy {
+            Strategy::Random => rand::random::<usize>() % self.hand.len(),
+            Strategy::Level1 => {
+                if self.ting.is_some() {
+                    self.hand.len() - 1
+                } else {
+                    self.choose_discard_card()
+                }
             }
-        } else {
-            0
+            Strategy::Test => 0,
         };
-        let card = *self.hand.get(index).unwrap();
+        let card = *self
+            .hand
+            .get(index)
+            .expect(&format!("discard index {}", index));
+        info!("robot {} discard {:?}", self.turn, card);
         self.out.push(card);
 
         self.hand.remove(index);
@@ -81,7 +112,9 @@ impl Agent {
             .enumerate()
             .map(|(ind, value)| ((*value * 1000.0) as usize, ind))
             .min()
-            .unwrap();
+            .expect(&format!(
+                "cannot find min value in scores: {scores:?}, groups {groups:?}"
+            ));
 
         let card = self.select_worst_one_from_group(&groups[ind]);
         self.hand.iter().position(|&c| c == card).unwrap()
@@ -109,11 +142,11 @@ impl Agent {
     }
 
     pub fn pao_card(&mut self, card: Card) -> bool {
-        if self.test {
-            return false;
-        }
-        // let res = rand::random::<u8>() % 2 == 1;
-        let res = true;
+        let res = match self.strategy {
+            Strategy::Random => rand::random::<u8>() % 2 == 1,
+            Strategy::Level1 => true,
+            Strategy::Test => return false,
+        };
         if res {
             self.pairing.push(Pairing::Quadlet(card));
             let mut index = vec![];
@@ -122,18 +155,21 @@ impl Agent {
                     index.push(i);
                 }
             }
+            debug!("[pao_card] hand: {:?}", self.hand);
+            debug!("[pao_card] discard_card: {:?}", card);
+            debug!("[pao_card] index: {:?}", index);
             assert!(index.len() == 3);
             for i in 0..3 {
                 self.hand.remove(index[i] - i);
             }
-            if let Some(c) = self.player_left_out.last() {
-                if c.is_same_kind(&card) {
-                    self.player_left_out.pop();
-                }
-            }
             if let Some(c) = self.player_right_out.last() {
                 if c.is_same_kind(&card) {
                     self.player_right_out.pop();
+                }
+            }
+            if let Some(c) = self.player_left_out.last() {
+                if c.is_same_kind(&card) {
+                    self.player_left_out.pop();
                 }
             }
         }
@@ -142,12 +178,10 @@ impl Agent {
         res
     }
     pub fn ding_card(&mut self, card: Card) -> bool {
-        let res = true;
-        // let res = if self.test {
-        //     true
-        // } else {
-        //     rand::random::<u8>() % 2 == 1
-        // };
+        let res = match self.strategy {
+            Strategy::Random => rand::random::<u8>() % 2 == 1,
+            _ => true,
+        };
         if res {
             self.pairing.push(Pairing::Triplet(card));
             let mut index = vec![];
@@ -156,19 +190,21 @@ impl Agent {
                     index.push(i);
                 }
             }
+            debug!("[ding_card] hand: {:?}", self.hand);
+            debug!("[ding_card] discard_card: {:?}", card);
+            debug!("[ding_card] index: {:?}", index);
             assert_eq!(index.len(), 2);
             for i in 0..2 {
                 self.hand.remove(index[i] - i);
             }
-
-            if let Some(c) = self.player_left_out.last() {
-                if c.is_same_kind(&card) {
-                    self.player_left_out.pop();
-                }
-            }
             if let Some(c) = self.player_right_out.last() {
                 if c.is_same_kind(&card) {
                     self.player_right_out.pop();
+                }
+            }
+            if let Some(c) = self.player_left_out.last() {
+                if c.is_same_kind(&card) {
+                    self.player_left_out.pop();
                 }
             }
         }
@@ -216,22 +252,36 @@ impl Agent {
             .chain(self.player_left_out.iter())
             .chain(self.player_right_out.iter())
         {
-            *mmap.entry(c.0 / 4).or_insert(4) -= 1;
+            *mmap.entry(c.0 / 4).or_insert(4) = mmap
+                .entry(c.0 / 4)
+                .or_insert(4)
+                .checked_sub(1)
+                .expect(&format!("cannot perform update on card {:?}", c));
         }
-        // debug!("[update_probability] mmap: {mmap:?}");
-        // debug!("[update_probability] hand: {:?}", self.hand);
-        // debug!("[update_probability] out: {:?}", self.out);
-        // debug!("[update_probability] left_out: {:?}", self.player_left_out);
-        // debug!("[update_probability] rigt_out: {:?}", self.player_right_out);
-        // debug!("[update_probability] pairing: {:?}", self.pairing);
-        // debug!(
-        //     "[update_probability] left_pairing: {:?}",
-        //     self.player_left_pairing
-        // );
-        // debug!(
-        //     "[update_probability] rigt_pairing: {:?}",
-        //     self.player_right_pairing
-        // );
+        let mut sort_map: Vec<_> = mmap
+            .iter()
+            .map(|(key, value)| (key, value))
+            .filter(|(_, value)| **value != 0)
+            .collect();
+        sort_map.sort();
+        self.hand.sort();
+        // self.out.sort();
+        // self.player_left_out.sort();
+        // self.player_right_out.sort();
+        debug!("[update_probability] mmap: {sort_map:?}");
+        debug!("[update_probability] hand: {:?}", self.hand);
+        debug!("[update_probability] out: {:?}", self.out);
+        debug!("[update_probability] left_out: {:?}", self.player_left_out);
+        debug!("[update_probability] rigt_out: {:?}", self.player_right_out);
+        debug!("[update_probability] pairing: {:?}", self.pairing);
+        debug!(
+            "[update_probability] left_pairing: {:?}",
+            self.player_left_pairing
+        );
+        debug!(
+            "[update_probability] rigt_pairing: {:?}",
+            self.player_right_pairing
+        );
         for p in self
             .pairing
             .iter()
@@ -239,9 +289,21 @@ impl Agent {
             .chain(self.player_right_pairing.iter())
         {
             match p {
-                Pairing::Triplet(c) => *mmap.entry(c.0 / 4).or_insert(4) -= 3,
-                Pairing::Quadlet(c) => *mmap.entry(c.0 / 4).or_insert(4) -= 4,
-            }
+                Pairing::Triplet(c) => {
+                    *mmap.entry(c.0 / 4).or_insert(4) = mmap
+                        .entry(c.0 / 4)
+                        .or_insert(4)
+                        .checked_sub(3)
+                        .expect(&format!("cannot perform update on card {c:?}"))
+                }
+                Pairing::Quadlet(c) => {
+                    *mmap.entry(c.0 / 4).or_insert(4) = mmap
+                        .entry(c.0 / 4)
+                        .or_insert(4)
+                        .checked_sub(4)
+                        .expect(&format!("cannot perform update on card {c:?}"))
+                }
+            };
         }
         self.remaining = mmap.values().fold(0, |acc, x| acc + x);
 
@@ -280,7 +342,10 @@ impl Agent {
     }
 
     fn get_same_card_prob_of(&self, card_type: u8) -> f32 {
-        let number = self.prob.get(&card_type).unwrap();
+        let number = self
+            .prob
+            .get(&card_type)
+            .expect(&format!("cannot find the prob of type {card_type}"));
         if *number == 0 {
             return 0.0;
         }
@@ -311,13 +376,16 @@ impl Agent {
     }
 
     fn form_shun(&self, group: &[Card]) -> f32 {
+        if group.len() == 0 {
+            return 0.0;
+        }
         let mut mmap: HashMap<u8, u8> = HashMap::new();
         for c in group {
             *mmap.entry(c.0 / 4).or_insert(0) += 1;
         }
         let cat = group[0].0 / 12;
         let (i, j, k) = (cat * 3, cat * 3 + 1, cat * 3 + 2);
-        if mmap.contains_key(&i) && mmap.contains_key(&j) && mmap.contains_key(&k) {
+        while mmap.contains_key(&i) && mmap.contains_key(&j) && mmap.contains_key(&k) {
             minus_entry(&mut mmap, i, 1);
             minus_entry(&mut mmap, j, 1);
             minus_entry(&mut mmap, k, 1);
@@ -342,6 +410,9 @@ impl Agent {
     }
 
     fn form_ke(&self, group: &[Card]) -> f32 {
+        if group.len() == 0 {
+            return 0.0;
+        }
         let mut mmap: HashMap<u8, u8> = HashMap::new();
         for c in group {
             *mmap.entry(c.0 / 4).or_insert(0) += 1;
@@ -358,23 +429,23 @@ impl Agent {
         if mmap.len() == 0 {
             return f32::MAX;
         }
-        for (key, value) in mmap {
-            assert!(value < 3);
-            assert!(value > 0);
+        for (key, value) in &mmap {
+            assert!(*value < 3);
+            assert!(*value > 0);
             let cnt = 3 - value;
-            let number = *self.prob.get(&key).unwrap();
+            let number = *value;
             if cnt == 1 {
                 // draw prob
-                let p1 = self.get_prob_of(key, 3);
+                let p1 = self.get_prob_of(*key, 3);
                 // peng prob
                 let p2 = number as f32 / (self.remaining + 19 * 2) as f32 * 2.0;
                 return p1 + p2;
             } else if cnt == 2 {
                 // draw prob
-                let p1 = self.get_same_card_prob_of(key);
+                let p1 = self.get_same_card_prob_of(*key);
                 // 1 draw 1 peng prob
                 let p_prob = number as f32 / (self.remaining - 3 + 19 * 2) as f32 * 2.0;
-                let p2 = self.get_prob_of(key, 3) * p_prob;
+                let p2 = self.get_prob_of(*key, 3) * p_prob;
                 return p1 + p2;
             } else {
                 unreachable!()
