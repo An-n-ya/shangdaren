@@ -54,6 +54,12 @@
     left: 50%;
     transform: translateX(-50%);
 }
+
+#jing {
+    position: absolute;
+    left: 250px;
+}
+
 #left,
 #right,
 #me {

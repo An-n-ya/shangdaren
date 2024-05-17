@@ -85,7 +85,7 @@ class Game {
             }
 
         } else if (msg.Initial !== undefined) {
-            const {to, cur_turn, hand} = msg.Initial;
+            const {to, cur_turn, hand, jing: jing_id} = msg.Initial;
             my_turn = to;
             current_turn = cur_turn;
             for (let i = 0; i < 3; i++) {
@@ -100,6 +100,9 @@ class Game {
             let left = (right + 1) % 3;
             players[right].name = "right";
             players[left].name = "left";
+
+            let jing_container = document.querySelector("#jing");
+            append_out(jing_container, new Card(jing_id));
 
             render();
 
@@ -335,7 +338,8 @@ function play_card_btn_enable(action) {
         play_btn.addEventListener('click', play_btn.play=play_card, false);
     } else if (action == "抛") {
         cancel_btn.removeAttribute("hidden");
-        play_btn.textContent = action;
+        let textContent = action + " [" + card_face[Math.floor(cur_pao_or_ding / 4)] + "]";
+        play_btn.textContent = textContent;
         play_btn.addEventListener('click', play_btn.play=function play() {
             game.sendPao(true);
             discard_type(players[current_turn].hand, cur_pao_or_ding);
@@ -354,7 +358,8 @@ function play_card_btn_enable(action) {
         }, false)
     } else if (action == "钉") {
         cancel_btn.removeAttribute("hidden");
-        play_btn.textContent = action;
+        let textContent = action + " [" + card_face[Math.floor(cur_pao_or_ding / 4)] + "]";
+        play_btn.textContent = textContent;
         play_btn.addEventListener('click', play_btn.play=function play() {
             game.sendDing(true);
             discard_type(players[current_turn].hand, cur_pao_or_ding);
