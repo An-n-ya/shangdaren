@@ -79,7 +79,7 @@ impl Agent {
             Strategy::Random => rand::random::<usize>() % self.hand.len(),
             Strategy::Level1 => {
                 if self.ting.is_some() {
-                    self.hand.len() - 1
+                    self.ting_card()
                 } else {
                     self.choose_discard_card()
                 }
@@ -99,6 +99,33 @@ impl Agent {
         self.ting = self.is_ting(&self.hand);
 
         card
+    }
+
+    fn ting_card(&self) -> usize {
+        let mut hand = self.hand.clone();
+        let (mut best_score, mut best_index) = (0, 0);
+        for i in 0..hand.len() {
+            hand.swap(0, i);
+
+            if let Some(ting_cards) = self.is_ting(&hand[1..]) {
+                let mut tmp = 0;
+                for c in ting_cards {
+                    tmp += self.prob[&c];
+                }
+
+                if tmp > best_score {
+                    best_score = tmp;
+                    best_index = i;
+                }
+            }
+
+            hand.swap(0, i);
+        }
+        if best_score == 0 {
+            self.choose_discard_card()
+        } else {
+            best_index
+        }
     }
 
     fn choose_discard_card(&self) -> usize {
@@ -213,9 +240,9 @@ impl Agent {
         res
     }
 
-    fn is_ting(&self, hand: &Vec<Card>) -> Option<Vec<u8>> {
+    fn is_ting(&self, hand: &[Card]) -> Option<Vec<u8>> {
         let mut ting_card = vec![];
-        let mut hand = hand.clone();
+        let mut hand = hand.to_vec();
         let mut score = 0;
         for p in &self.pairing {
             match p {
