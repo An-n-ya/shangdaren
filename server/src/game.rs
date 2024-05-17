@@ -607,7 +607,7 @@ impl Game {
             tokio::select! {
                 update = rx.recv() => {
                     let update = update.unwrap();
-                    debug!("[send message] {update:?}");
+                    // debug!("[send message] {update:?}");
                     if update.is_broadcast() || update.to().is_some() && update.to().unwrap() == id {
                         socket.send(update.into()).await?;
                     }
@@ -656,7 +656,7 @@ impl Game {
                 serde_json::from_str(text).context("failed to deserialized client message")?
             }
         };
-        debug!("[handle message] message {message:?}");
+        // debug!("[handle message] message {message:?}");
         match message {
             ClientMessage::Test(_) => {
                 self.state.write().test = true;

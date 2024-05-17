@@ -371,6 +371,7 @@ function play_card_btn_enable(action) {
             container = document.querySelector('#right-cards');
             remove_card_from(container, cur_pao_or_ding);
             hide_btn();
+            play_card_btn_enable("出牌")
         }, false);
         cancel_btn.addEventListener('click', cancel_btn.cancel=function cancel() {
             game.sendDing(false);

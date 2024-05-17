@@ -7,6 +7,7 @@ use crate::{
     game::GameState,
 };
 
+#[derive(Debug)]
 pub enum Strategy {
     Random,
     Level1,
@@ -101,7 +102,7 @@ impl Agent {
         card
     }
 
-    fn ting_card(&self) -> usize {
+    fn ting_card(&mut self) -> usize {
         let mut hand = self.hand.clone();
         let (mut best_score, mut best_index) = (0, 0);
         for i in 0..hand.len() {
@@ -122,6 +123,7 @@ impl Agent {
             hand.swap(0, i);
         }
         if best_score == 0 {
+            self.ting = None;
             self.choose_discard_card()
         } else {
             best_index
@@ -130,7 +132,7 @@ impl Agent {
 
     fn choose_discard_card(&self) -> usize {
         let groups = divide_into_group(&self.hand);
-        let scores: Vec<f32> = groups
+        let mut scores: Vec<f32> = groups
             .iter()
             .map(|group| self.form_ke(group) + self.form_shun(group))
             .collect();
@@ -143,6 +145,10 @@ impl Agent {
                 "cannot find min value in scores: {scores:?}, groups {groups:?}"
             ));
 
+        // debug!(
+        //     "[choose discard_card] groups: {:?}, scores: {:?}, choose ind: {ind}",
+        //     groups, scores
+        // );
         let card = self.select_worst_one_from_group(&groups[ind]);
         self.hand.iter().position(|&c| c == card).unwrap()
     }
@@ -285,30 +291,30 @@ impl Agent {
                 .checked_sub(1)
                 .expect(&format!("cannot perform update on card {:?}", c));
         }
-        let mut sort_map: Vec<_> = mmap
-            .iter()
-            .map(|(key, value)| (key, value))
-            .filter(|(_, value)| **value != 0)
-            .collect();
-        sort_map.sort();
-        self.hand.sort();
+        // let mut sort_map: Vec<_> = mmap
+        //     .iter()
+        //     .map(|(key, value)| (key, value))
+        //     .filter(|(_, value)| **value != 0)
+        //     .collect();
+        // sort_map.sort();
+        // self.hand.sort();
         // self.out.sort();
         // self.player_left_out.sort();
         // self.player_right_out.sort();
-        debug!("[update_probability] mmap: {sort_map:?}");
-        debug!("[update_probability] hand: {:?}", self.hand);
-        debug!("[update_probability] out: {:?}", self.out);
-        debug!("[update_probability] left_out: {:?}", self.player_left_out);
-        debug!("[update_probability] rigt_out: {:?}", self.player_right_out);
-        debug!("[update_probability] pairing: {:?}", self.pairing);
-        debug!(
-            "[update_probability] left_pairing: {:?}",
-            self.player_left_pairing
-        );
-        debug!(
-            "[update_probability] rigt_pairing: {:?}",
-            self.player_right_pairing
-        );
+        // debug!("[update_probability] mmap: {sort_map:?}");
+        // debug!("[update_probability] hand: {:?}", self.hand);
+        // debug!("[update_probability] out: {:?}", self.out);
+        // debug!("[update_probability] left_out: {:?}", self.player_left_out);
+        // debug!("[update_probability] rigt_out: {:?}", self.player_right_out);
+        // debug!("[update_probability] pairing: {:?}", self.pairing);
+        // debug!(
+        //     "[update_probability] left_pairing: {:?}",
+        //     self.player_left_pairing
+        // );
+        // debug!(
+        //     "[update_probability] rigt_pairing: {:?}",
+        //     self.player_right_pairing
+        // );
         for p in self
             .pairing
             .iter()
@@ -334,20 +340,29 @@ impl Agent {
         }
         self.remaining = mmap.values().fold(0, |acc, x| acc + x);
 
+        let mut sort_map: Vec<_> = mmap
+            .iter()
+            .map(|(key, value)| (key, value))
+            .filter(|(_, value)| **value != 0)
+            .collect();
+        sort_map.sort();
+
         self.prob = mmap
     }
 
     fn get_prob_of(&self, card_type: u8, skip: usize) -> f32 {
         let number = self.prob.get(&card_type).unwrap();
+        // debug!("[get_prob_of] {:?}", self.prob);
+        // debug!("    card_type: {card_type}, number {number}");
         if *number == 0 {
             return 0.0;
         }
         let mut acc = 0.0;
         for i in 0..(1 << skip) {
-            if i & 1 != 1 {
+            if i % 2 != 1 {
                 continue;
             }
-            let mut p = 0.0;
+            let mut p = 1.0;
             let mut n = *number as f32;
             let mut remaining = self.remaining as f32;
             for k in (0..skip).rev() {
@@ -363,7 +378,10 @@ impl Agent {
                 }
                 remaining -= 1.0;
             }
-            acc += p;
+            if p != 1.0 {
+                acc += p;
+            }
+            // debug!("        p: {p}, acc {acc}, i: {i:#b}, n: {n}, remaining: {remaining}");
         }
         acc
     }
@@ -381,7 +399,7 @@ impl Agent {
             if i & 1 != 1 || i & (1 << 3) != 1 {
                 continue;
             }
-            let mut p = 0.0;
+            let mut p = 1.0;
             let mut n = *number as f32;
             let mut remaining = self.remaining as f32;
             for k in (0..6).rev() {
@@ -397,7 +415,9 @@ impl Agent {
                 }
                 remaining -= 1.0;
             }
-            acc += p;
+            if p != 1.0 {
+                acc += p;
+            }
         }
         acc
     }
@@ -426,14 +446,22 @@ impl Agent {
                 need_card.push(c);
             }
         }
-        if need_card.len() == 1 {
+        // debug!("[form_shun], group: {group:?}, mmap: {mmap:?}, need_card: {need_card:?}");
+        let mut res = if need_card.len() == 1 {
             self.get_prob_of(need_card[0], 3)
         } else {
             let (c1, c2) = (need_card[0], need_card[1]);
             let p1 = self.get_prob_of(c1, 3) * self.get_prob_of(c2, 6);
             let p2 = self.get_prob_of(c2, 3) * self.get_prob_of(c1, 6);
+            // debug!("    p1: {p1}, p2: {p2}");
             p1 + p2
+        };
+        // debug!("    res: {res}");
+        if cat == 0 || self.jing.0 / 12 == cat {
+            res *= 2.0;
         }
+
+        res
     }
 
     fn form_ke(&self, group: &[Card]) -> f32 {
@@ -456,6 +484,7 @@ impl Agent {
         if mmap.len() == 0 {
             return f32::MAX;
         }
+        let mut res = 0.0;
         for (key, value) in &mmap {
             assert!(*value < 3);
             assert!(*value > 0);
@@ -466,19 +495,22 @@ impl Agent {
                 let p1 = self.get_prob_of(*key, 3);
                 // peng prob
                 let p2 = number as f32 / (self.remaining + 19 * 2) as f32 * 2.0;
-                return p1 + p2;
+                res = p1 + p2;
             } else if cnt == 2 {
                 // draw prob
                 let p1 = self.get_same_card_prob_of(*key);
                 // 1 draw 1 peng prob
                 let p_prob = number as f32 / (self.remaining - 3 + 19 * 2) as f32 * 2.0;
                 let p2 = self.get_prob_of(*key, 3) * p_prob;
-                return p1 + p2;
+                res = p1 + p2;
             } else {
                 unreachable!()
             }
         }
-        unreachable!()
+        if cat == 0 || self.jing.0 / 12 == cat {
+            res *= 2.0;
+        }
+        res
     }
 }
 fn minus_entry(cnt: &mut HashMap<u8, u8>, key: u8, val: u8) {
