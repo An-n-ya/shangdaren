@@ -156,12 +156,15 @@ impl GameState {
     const TOTAL: usize = 96;
     const PLAYER_NUM: u8 = 3;
     pub fn add_player(&mut self) {
-        self.players.push(Agent::default())
+        let mut player = Agent::default();
+        player.id = self.players.len() as u8;
+        self.players.push(player)
     }
     pub fn add_robot(&mut self) {
         let mut agent = Agent::default();
         agent.is_robot = true;
         agent.ready = true;
+        agent.id = self.players.len() as u8;
         agent.update_probability();
         if self.test {
             agent.strategy = Strategy::Test;
@@ -214,6 +217,16 @@ impl GameState {
         }
         self.prev_turn = None;
         self.mode = Mode::Normal;
+    }
+
+    pub fn check_state(&self) {
+        for p in &self.players {
+            if p.id == self.turn {
+                p.check_state(20);
+            } else {
+                p.check_state(19);
+            }
+        }
     }
 
     pub fn restore_turn(&mut self) -> ServerMessage {
@@ -294,12 +307,22 @@ impl GameState {
                     self.players[i].player_left_out.pop();
                 }
             }
+            let mut index = vec![];
+            for (i, c) in self.players[i].hand.iter().enumerate() {
+                if c.is_same_kind(&card) {
+                    index.push(i);
+                }
+            }
+            for i in 0..index.len() {
+                self.players[i].hand.remove(index[i] - i);
+            }
         }
     }
 
     pub fn draw_card(&mut self) -> ServerMessage {
         if let Some(card) = self.remaining_cards.pop() {
-            self.players[self.turn as usize].hand.push(card);
+            self.players[self.turn as usize].draw_card(card);
+            self.check_state();
             ServerMessage::Draw {
                 to: Some(self.turn),
                 card,
