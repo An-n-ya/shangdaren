@@ -34,10 +34,20 @@ pub struct Agent {
     pub is_robot: bool,
     pub ready: bool,
     pub strategy: Strategy,
+    pub id: u8,
     prob: HashMap<u8, u8>,
     remaining: u8,
     pub jing: Card,
     ting: Option<Vec<u8>>,
+    history: Vec<Action>,
+}
+
+#[derive(Debug)]
+enum Action {
+    Draw(Card),
+    Discard(Card),
+    Ding(Card),
+    Pao(Card),
 }
 
 fn divide_into_group(hand: &Vec<Card>) -> Vec<Vec<Card>> {
@@ -62,10 +72,31 @@ fn divide_into_group(hand: &Vec<Card>) -> Vec<Vec<Card>> {
 }
 
 impl Agent {
+    pub fn draw_card(&mut self, card: Card) {
+        self.history.push(Action::Draw(card));
+        self.hand.push(card);
+    }
+    pub fn check_state(&self, expect: usize) {
+        let mut card_size = self.hand.len();
+        for pair in &self.pairing {
+            card_size += match pair {
+                Pairing::Triplet(_) => 3,
+                Pairing::Quadlet(_) => 3,
+            };
+        }
+        assert!(
+            card_size == expect,
+            "the total card should be {}, got {}, history: {:?}",
+            expect,
+            card_size,
+            self.history
+        );
+    }
     pub fn clear(&mut self) {
         self.hand.clear();
         self.out.clear();
         self.pairing.clear();
+        self.history.clear();
         self.player_left_out.clear();
         self.player_right_out.clear();
         self.player_left_pairing.clear();
@@ -98,6 +129,8 @@ impl Agent {
 
         self.update_probability();
         self.ting = self.is_ting(&self.hand);
+
+        self.history.push(Action::Discard(card));
 
         card
     }
@@ -132,7 +165,7 @@ impl Agent {
 
     fn choose_discard_card(&self) -> usize {
         let groups = divide_into_group(&self.hand);
-        let mut scores: Vec<f32> = groups
+        let scores: Vec<f32> = groups
             .iter()
             .map(|group| self.form_ke(group) + self.form_shun(group))
             .collect();
@@ -192,6 +225,7 @@ impl Agent {
             debug!("[pao_card] discard_card: {:?}", card);
             debug!("[pao_card] index: {:?}", index);
             assert!(index.len() == 3);
+            self.history.push(Action::Pao(card));
             for i in 0..3 {
                 self.hand.remove(index[i] - i);
             }
@@ -227,6 +261,7 @@ impl Agent {
             debug!("[ding_card] discard_card: {:?}", card);
             debug!("[ding_card] index: {:?}", index);
             assert_eq!(index.len(), 2);
+            self.history.push(Action::Ding(card));
             for i in 0..2 {
                 self.hand.remove(index[i] - i);
             }
