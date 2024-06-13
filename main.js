@@ -66,6 +66,7 @@ class Game {
     handleMessage(msg) {
         if (msg.Turn !== undefined) {
             const {to, turn, mode} = msg.Turn;
+            let prev_turn = current_turn;
             current_turn = turn;
             if (turn == my_turn) {
                 console.log("[handleMessage] mode:", mode);
@@ -74,10 +75,18 @@ class Game {
                 } else {
                     if (mode.Pao != undefined) {
                         cur_pao_or_ding = mode.Pao;
+                        let card = new Card(cur_pao_or_ding);
+                        players[prev_turn].out.push(card);
+                        let container = document.querySelector("#" + players[prev_turn].name + "-cards");
+                        append_out(container, card);
                         console.log("cur_pao_or_ding", cur_pao_or_ding);
                         play_card_btn_enable("抛");
                     } else if (mode.Ding != undefined) {
                         cur_pao_or_ding = mode.Ding;
+                        let card = new Card(cur_pao_or_ding);
+                        players[prev_turn].out.push(card);
+                        let container = document.querySelector("#" + players[prev_turn].name + "-cards");
+                        append_out(container, card);
                         console.log("cur_pao_or_ding", cur_pao_or_ding);
                         play_card_btn_enable("钉");
                     }
@@ -112,7 +121,11 @@ class Game {
 
         } else if (msg.Draw !== undefined) {
             const {to, card: id} = msg.Draw;
-            players[my_turn].hand.push(new Card(id));
+            let card = new Card(id);
+            card.rendering = false;
+            players[my_turn].hand.push(card);
+            let draw_container = document.querySelector("#draw");
+            append_out(draw_container, card, "", true);
             render();
             if (current_turn == my_turn) {
                 play_card_btn_enable("出牌");
@@ -120,6 +133,7 @@ class Game {
 
         } else if (msg.Discard !== undefined) {
             const {to, card: id} = msg.Discard;
+            if (to == my_turn || current_turn == my_turn) {return;}
             let card = new Card(id);
             players[current_turn].out.push(card);
             let container = document.querySelector("#" + players[current_turn].name + "-cards");
@@ -188,10 +202,12 @@ class Card {
     type;
     selected;
     id;
+    rendering;
 
     constructor(id) {
         this.type = card_face[Math.floor(id / 4)];
         this.selected = false;
+        this.rendering = true;
         this.id = id;
     }
 
@@ -280,8 +296,11 @@ async function start() {
 function play_card() {
     let hand = players[my_turn].hand;
     let card = undefined;
+    let container = document.querySelector('#draw');
+    container.replaceChildren();
     for (let i = 0; i < hand.length; i++) {
         card = hand[i];
+        card.rendering = true;
         if (card.selected) {
             hand.splice(i, 1);
             card.selected = false;
@@ -297,18 +316,6 @@ function play_card() {
 }
 
 
-async function broadcast_discard(card) {
-    for (let i = 0; i < 3; i++) {
-        if (i != my_turn && i != current_turn) {
-            request.post("/discard/" + session_id, {
-                card: card.id,
-                turn: i,
-                cur_turn: current_turn
-            });
-        }
-    }
-}
-
 
 function discard_card(hand, id) {
     for (let i = 0 ; i < hand.length; i++) {
@@ -321,6 +328,7 @@ function discard_card(hand, id) {
 }
 function discard_type(hand, id) {
     console.log("discard_type, hand:", hand, "id:", id);
+    sort_hand();
     let index = [];
     for (let i = 0 ; i < hand.length; i++) {
         if (Math.floor(hand[i].id / 4) == Math.floor(id / 4)) {
@@ -363,13 +371,13 @@ function play_card_btn_enable(action) {
         play_btn.addEventListener('click', play_btn.play=function play() {
             game.sendDing(true);
             discard_type(players[current_turn].hand, cur_pao_or_ding);
-            render();
             let container = document.querySelector('#my-pairing');
             append_out(container, new Card(cur_pao_or_ding), action);
             container = document.querySelector('#left-cards');
             remove_card_from(container, cur_pao_or_ding);
             container = document.querySelector('#right-cards');
             remove_card_from(container, cur_pao_or_ding);
+            render();
             hide_btn();
             play_card_btn_enable("出牌")
         }, false);
@@ -411,8 +419,8 @@ function remove_card_from(container, card_id) {
     })
 }
 
-function append_out(container, card, flag="") {
-    container.appendChild(create_card(card, false, flag))
+function append_out(container, card, flag="", clickable=false) {
+    container.appendChild(create_card(card, clickable, flag))
 }
 
 
@@ -425,6 +433,9 @@ function render() {
     group.id = "group";
     for (let i = 0; i < players[my_turn].hand.length; i++) {
         let card = players[my_turn].hand[i];
+        if (!card.rendering) {
+            continue;
+        }
         if (card.id >= (cur_group - 1) * 12 && card.id < cur_group * 12) {
             group.appendChild(create_card(card, true));
         } else {
@@ -483,8 +494,14 @@ function create_card(card, clickable, flag) {
             for (let i = 0; i < hand.length; i++) {
                 if (hand[i].id == card.id) {
                     hand[i].selected = true;
+                    let card_wrapper = document.getElementsByClassName("" +card.id)[0];
+                    // let card_wrapper = document.querySelector("#card-wrapper." + card.id);
+                    card_wrapper.classList.add("selected");
                 } else {
                     hand[i].selected = false;
+                    let card_wrapper = document.getElementsByClassName("" +hand[i].id)[0];
+
+                    card_wrapper.classList.remove("selected");
                 }
             }
             render();

@@ -30,7 +30,7 @@
 /* #card-wrapper:last-child {
     overflow: visible;
 } */
-#card.selected{
+#card-wrapper.selected{
     border: 2px solid red;
     box-shadow: rgba(170, 0, 0, 0.35) 0px 5px 15px;
     /* top: -10px; */
@@ -55,6 +55,11 @@
     transform: translateX(-50%);
 }
 
+#draw {
+    position: absolute;
+    right: 250px;
+    bottom: 50px;
+}
 #jing {
     position: absolute;
     left: 250px;
